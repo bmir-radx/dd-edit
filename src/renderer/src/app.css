@@ -249,6 +249,63 @@ pre.preview.stale { opacity: 0.5; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The label for a tag-editor field (a div, not a <label>, so it lines up). */
+.inspector .tag-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+
+/* Chip/tag editor: chips wrap in a field-like box with a trailing input. */
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+.tag-editor:focus-within { outline: 3px solid var(--accent-soft); border-color: var(--accent); }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px 2px 9px;
+  background: #eef4ff;
+  color: #1d4ed8;
+  border: 1px solid #d3e0fb;
+  border-radius: 999px;
+  font-size: 12px;
+  max-width: 100%;
+}
+.tag .tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag .tag-x {
+  border: none;
+  background: transparent;
+  color: #1d4ed8;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 999px;
+  opacity: 0.6;
+}
+.tag .tag-x:hover { opacity: 1; background: #d3e0fb; }
+.tag-editor .tag-input {
+  flex: 1;
+  min-width: 90px;
+  border: none;
+  outline: none;
+  padding: 2px;
+  font: inherit;
+  background: transparent;
+}
+.tag-editor .tag-input:focus { outline: none; }
+
 .inspector .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .inspector .check {
   display: flex;

@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react'
 marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
-import { CommitInput, CommitTextarea, CommitWrapInput } from './inputs'
+import { CommitInput, CommitTextarea, CommitWrapInput, TagEditor } from './inputs'
 import { pillColors } from './pillColors'
 import type { DataElement, EnumItem } from './types/document'
 
@@ -28,7 +28,6 @@ function pillStyle(key: 'datatype' | 'cardinality', value: string) {
 type NullableTextKey =
   | 'description' | 'section' | 'unit' | 'pattern' | 'precondition'
   | 'notes' | 'provenance' | 'see_also'
-type ListKey = 'aliases' | 'terms' | 'examples'
 type ItemsKey = 'enumeration' | 'missing_value_codes'
 
 export function ElementInspector({ row, datatypes }: { row: number | null; datatypes: string[] }) {
@@ -66,16 +65,11 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
     apply((d) => setField(d, index, key, value))
   const commitNullable = (key: NullableTextKey) => (value: string) =>
     apply((d) => setField(d, index, key, value === '' ? null : value))
-  const commitList = (key: ListKey) => (value: string) =>
-    apply((d) =>
-      setField(d, index, key, value.split('\n').map((s) => s.trim()).filter(Boolean)),
-    )
   const items = (key: ItemsKey): EnumItem[] => (element[key] ?? []) as EnumItem[]
   const commitItems = (key: ItemsKey, next: EnumItem[]) =>
     apply((d) => setField(d, index, key, next))
 
   const text = (key: NullableTextKey): string => (element[key] ?? '') as string
-  const listText = (key: ListKey): string => ((element[key] ?? []) as string[]).join('\n')
 
   return (
     <div className="inspector">
@@ -99,6 +93,14 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <span>Section <Dot k="section" /></span>
           <CommitInput value={text('section')} onCommit={commitNullable('section')} />
         </label>
+        <div className="field">
+          <span className="tag-label">Aliases <Dot k="aliases" /></span>
+          <TagEditor
+            values={(element.aliases ?? []) as string[]}
+            onChange={(v) => apply((d) => setField(d, index, 'aliases', v))}
+            placeholder="add an alternative id…"
+          />
+        </div>
       </section>
 
       <section className="card">
@@ -164,6 +166,14 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <span>Precondition <Dot k="precondition" /></span>
           <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />
         </label>
+        <div className="field">
+          <span className="tag-label">Ontology terms <Dot k="terms" /></span>
+          <TagEditor
+            values={(element.terms ?? []) as string[]}
+            onChange={(v) => apply((d) => setField(d, index, 'terms', v))}
+            placeholder="add a term IRI or OBO id…"
+          />
+        </div>
       </section>
 
       <section className="card">
@@ -193,6 +203,14 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <span>Notes <Dot k="notes" /></span>
           <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={2} />
         </label>
+        <div className="field">
+          <span className="tag-label">Example values <Dot k="examples" /></span>
+          <TagEditor
+            values={(element.examples ?? []) as string[]}
+            onChange={(v) => apply((d) => setField(d, index, 'examples', v))}
+            placeholder="add an example value…"
+          />
+        </div>
         <div className="row2">
           <label className="field">
             <span>Provenance <Dot k="provenance" /></span>
@@ -201,24 +219,6 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <label className="field">
             <span>See also (URL) <Dot k="see_also" /></span>
             <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
-          </label>
-        </div>
-      </section>
-
-      <section className="card">
-        <h3>Lists</h3>
-        <label className="field">
-          <span>Ontology terms — one per line <Dot k="terms" /></span>
-          <CommitTextarea value={listText('terms')} onCommit={commitList('terms')} rows={2} />
-        </label>
-        <div className="row2">
-          <label className="field">
-            <span>Aliases — one per line <Dot k="aliases" /></span>
-            <CommitTextarea value={listText('aliases')} onCommit={commitList('aliases')} rows={2} />
-          </label>
-          <label className="field">
-            <span>Examples — one per line <Dot k="examples" /></span>
-            <CommitTextarea value={listText('examples')} onCommit={commitList('examples')} rows={2} />
           </label>
         </div>
       </section>

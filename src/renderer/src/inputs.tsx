@@ -97,3 +97,59 @@ export function CommitTextarea({ value, onCommit, placeholder, rows }: CommitPro
     />
   )
 }
+
+/**
+ * Tag/chip editor for a list of short string values (aliases, terms,
+ * examples). Each value is a removable chip; a trailing input adds one on
+ * Enter or comma. Editing a chip's text is done by removing and re-adding —
+ * fine for the short values these hold.
+ */
+export function TagEditor({
+  values,
+  onChange,
+  placeholder,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
+}) {
+  const [draft, setDraft] = useState('')
+
+  const add = () => {
+    const v = draft.trim()
+    if (v !== '' && !values.includes(v)) onChange([...values, v])
+    setDraft('')
+  }
+  const removeAt = (i: number) => onChange(values.filter((_, j) => j !== i))
+
+  return (
+    <div className="tag-editor">
+      {values.map((v, i) => (
+        <span className="tag" key={`${v}-${i}`}>
+          <span className="tag-text">{v}</span>
+          <button type="button" className="tag-x" title="Remove" onClick={() => removeAt(i)}>
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        className="tag-input"
+        value={draft}
+        placeholder={values.length === 0 ? placeholder : ''}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={add}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault()
+            add()
+          } else if (e.key === 'Backspace' && draft === '' && values.length > 0) {
+            removeAt(values.length - 1)
+          } else if (e.key === 'Escape') {
+            setDraft('')
+          }
+        }}
+      />
+    </div>
+  )
+}
