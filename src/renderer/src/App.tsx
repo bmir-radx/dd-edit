@@ -43,7 +43,33 @@ export function App() {
   const [cursorRow, setCursorRow] = useState<number | null>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [findings, setFindings] = useState<Finding[]>([])
+  const [wrapText, setWrapText] = useState(false)
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const stored = Number(localStorage.getItem('dd-edit.panelWidth'))
+    return stored >= 280 && stored <= 800 ? stored : 400
+  })
   const gridRef = useRef<DataEditorRef | null>(null)
+
+  useEffect(() => {
+    localStorage.setItem('dd-edit.panelWidth', String(panelWidth))
+  }, [panelWidth])
+
+  const startPanelResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault()
+      const startX = e.clientX
+      const startW = panelWidth
+      const move = (ev: PointerEvent) =>
+        setPanelWidth(Math.min(800, Math.max(280, startW + (startX - ev.clientX))))
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [panelWidth],
+  )
 
   const isEmpty = doc.elements.length === 0 && filePath === null && !dirty
 
@@ -242,6 +268,13 @@ export function App() {
           <button onClick={redo} disabled={redoStack.length === 0} title="Redo (⇧⌘Z)"><IconRedo />Redo</button>
         </div>
         <button onClick={() => setShowSearch(true)} title="Search (⌘F)"><IconSearch />Search</button>
+        <button
+          className={wrapText ? 'toggled' : ''}
+          onClick={() => setWrapText((v) => !v)}
+          title="Wrap long text in cells"
+        >
+          Wrap
+        </button>
         {sections.length > 1 ? (
           <select
             className="section-jump"
@@ -295,11 +328,17 @@ export function App() {
                 showSearch={showSearch}
                 onSearchClose={() => setShowSearch(false)}
                 findings={findings}
+                wrapText={wrapText}
                 gridRef={gridRef}
               />
             </div>
             {panelOpen ? (
-              <aside className="panel">
+              <aside className="panel" style={{ width: panelWidth }}>
+                <div
+                  className="panel-resizer"
+                  onPointerDown={startPanelResize}
+                  title="Drag to resize"
+                />
                 <div className="tabs">
                   {tab('element', 'Element')}
                   {tab('csv', 'CSV')}

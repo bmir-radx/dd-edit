@@ -1,17 +1,24 @@
 /**
  * The spreadsheet: rows are data elements, columns are the spec's fields.
  *
- * Milestone-2 scope: inline editing of the scalar fields (text + the required
- * checkbox), append via the trailing row, drag row-reorder, multi-row
- * selection + delete, copy/paste of cell ranges. List-valued fields
- * (enumeration, missing-value codes, terms, aliases, examples) render as
- * read-only summaries here; their structured editors are milestone 3.
+ * Color is meaning here, never decoration:
+ *   red / amber   validation problems (row tint; offending cell stronger)
+ *   blue dot      rows modified since open / last save
+ *   datatype hue  kind of data (numeric blue, temporal violet, coded teal)
+ *   section tint  stable pastel per section name, so groups scan visually
+ *   bubbles       list-valued fields render as pills (read-only; edited in
+ *                 the inspector)
+ *
+ * "Modified" is computed by reference identity against the baseline document:
+ * mutations share structure, so an element is untouched iff its object is the
+ * very object in the baseline — undoing back to the original clears the dot.
  */
 import {
   CompactSelection,
   DataEditor,
   GridCellKind,
   type DataEditorRef,
+  type DrawCellCallback,
   type EditableGridCell,
   type GridCell,
   type GridColumn,
@@ -57,9 +64,36 @@ const CELL_TINT: Record<FindingLevel, string | undefined> = {
   WARNING: '#faeeca',
   INFO: undefined,
 }
+const MODIFIED_BLUE = '#2563eb'
 
 function worse(a: FindingLevel | undefined, b: FindingLevel): FindingLevel {
   return a === 'ERROR' || b === 'ERROR' ? 'ERROR' : a === 'WARNING' || b === 'WARNING' ? 'WARNING' : b
+}
+
+/** Datatype families get a hue so a column of types is scannable at a glance. */
+function datatypePill(datatype: string): { bg: string; fg: string } {
+  const s = datatype.toLowerCase()
+  if (/(int|float|decimal|double|number)/.test(s)) return { bg: '#dbeafe', fg: '#1d4ed8' } // numeric
+  if (/(date|time|year)/.test(s)) return { bg: '#ede9fe', fg: '#6d28d9' } // temporal
+  if (/bool/.test(s)) return { bg: '#d1fae5', fg: '#047857' } // boolean
+  if (/(url|iri|uri|email|phone|zip|sha|mime)/.test(s)) return { bg: '#cffafe', fg: '#0e7490' } // coded
+  return { bg: '#f1f5f9', fg: '#475569' } // text / other
+}
+
+/** Pill colors for the three categorical columns (all stay editable). */
+function pillColors(key: 'section' | 'cardinality' | 'datatype', text: string) {
+  if (key === 'datatype') return datatypePill(text)
+  if (key === 'cardinality') {
+    return text === 'multiple' ? { bg: '#ede9fe', fg: '#6d28d9' } : { bg: '#f1f5f9', fg: '#475569' }
+  }
+  return { bg: sectionTint(text), fg: '#374151' }
+}
+
+/** A stable pastel per section name (hash -> hue), light enough for text. */
+function sectionTint(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
+  return `hsl(${h} 60% 94%)`
 }
 
 type ScalarKey =
@@ -70,22 +104,22 @@ type ScalarKey =
   | 'section'
   | 'unit'
   | 'pattern'
-  | 'description'
   | 'precondition'
   | 'notes'
   | 'provenance'
   | 'see_also'
 
 interface ColumnSpec {
-  key: keyof DataElement
+  key: keyof DataElement | '__mod'
   title: string
   width: number
-  kind: 'text' | 'boolean' | 'summary'
+  kind: 'modified' | 'text' | 'boolean' | 'bubble' | 'markdown'
   /** Blank input stores null (optional fields) rather than "". */
   nullable?: boolean
 }
 
 const COLUMNS: ColumnSpec[] = [
+  { key: '__mod', title: '', width: 34, kind: 'modified' },
   { key: 'id', title: 'Id', width: 160, kind: 'text' },
   { key: 'label', title: 'Label', width: 200, kind: 'text' },
   { key: 'datatype', title: 'Datatype', width: 110, kind: 'text' },
@@ -93,28 +127,32 @@ const COLUMNS: ColumnSpec[] = [
   { key: 'required', title: 'Required', width: 85, kind: 'boolean' },
   { key: 'section', title: 'Section', width: 150, kind: 'text', nullable: true },
   { key: 'unit', title: 'Unit', width: 90, kind: 'text', nullable: true },
-  { key: 'enumeration', title: 'Enumeration', width: 220, kind: 'summary' },
-  { key: 'missing_value_codes', title: 'Missing values', width: 140, kind: 'summary' },
+  { key: 'enumeration', title: 'Enumeration', width: 230, kind: 'bubble' },
+  { key: 'missing_value_codes', title: 'Missing values', width: 150, kind: 'bubble' },
   { key: 'pattern', title: 'Pattern', width: 130, kind: 'text', nullable: true },
   { key: 'precondition', title: 'Precondition', width: 160, kind: 'text', nullable: true },
-  { key: 'terms', title: 'Terms', width: 150, kind: 'summary' },
-  { key: 'description', title: 'Description', width: 320, kind: 'text', nullable: true },
-  { key: 'aliases', title: 'Aliases', width: 120, kind: 'summary' },
-  { key: 'examples', title: 'Examples', width: 140, kind: 'summary' },
+  { key: 'terms', title: 'Terms', width: 160, kind: 'bubble' },
+  { key: 'description', title: 'Description', width: 320, kind: 'markdown', nullable: true },
+  { key: 'aliases', title: 'Aliases', width: 130, kind: 'bubble' },
+  { key: 'examples', title: 'Examples', width: 150, kind: 'bubble' },
   { key: 'notes', title: 'Notes', width: 200, kind: 'text', nullable: true },
   { key: 'provenance', title: 'Provenance', width: 180, kind: 'text', nullable: true },
   { key: 'see_also', title: 'See also', width: 180, kind: 'text', nullable: true },
 ]
 
-function summarize(key: keyof DataElement, element: DataElement): string {
+const BUBBLE_CAP = 6
+
+function bubbles(key: keyof DataElement, element: DataElement): string[] {
+  let all: string[]
   if (key === 'enumeration' || key === 'missing_value_codes') {
-    const items = (element[key] ?? []) as EnumItem[]
-    if (items.length === 0) return ''
-    const shown = items.slice(0, 3).map((i) => `${i.value}=${i.label}`).join(' | ')
-    return items.length > 3 ? `${shown} … (${items.length})` : shown
+    all = ((element[key] ?? []) as EnumItem[]).map((i) => `${i.value} = ${i.label}`)
+  } else {
+    all = (element[key] ?? []) as string[]
   }
-  const list = (element[key] ?? []) as string[]
-  return list.join(' | ')
+  if (all.length > BUBBLE_CAP) {
+    return [...all.slice(0, BUBBLE_CAP), `+${all.length - BUBBLE_CAP} more`]
+  }
+  return all
 }
 
 export interface GridViewProps {
@@ -123,12 +161,22 @@ export interface GridViewProps {
   showSearch: boolean
   onSearchClose: () => void
   findings: Finding[]
+  /** Wrap long text in cells (rows grow taller). */
+  wrapText: boolean
   /** For imperative scrolling (problems panel, section jumper). */
   gridRef?: Ref<DataEditorRef>
 }
 
-export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gridRef }: GridViewProps) {
+export function GridView({
+  onCursorRow,
+  showSearch,
+  onSearchClose,
+  findings,
+  wrapText,
+  gridRef,
+}: GridViewProps) {
   const doc = useEditor((s) => s.doc)
+  const baseline = useEditor((s) => s.baseline)
   const apply = useEditor((s) => s.apply)
 
   const [widths, setWidths] = useState<Record<string, number>>({})
@@ -136,6 +184,8 @@ export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gri
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   })
+
+  const baselineRefs = useMemo(() => new Set<DataElement>(baseline.elements), [baseline])
 
   // Row -> worst level, and "row|field" -> worst level, for the tints.
   const { rowLevels, cellLevels } = useMemo(() => {
@@ -163,46 +213,77 @@ export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gri
       if (!spec || !element) {
         return { kind: GridCellKind.Text, data: '', displayData: '', allowOverlay: false }
       }
-      const level = cellLevels.get(`${row}|${spec.key}`)
+
+      if (spec.kind === 'modified') {
+        const modified = !baselineRefs.has(element)
+        return {
+          kind: GridCellKind.Text,
+          data: modified ? 'modified' : '',
+          displayData: modified ? '●' : '',
+          allowOverlay: false,
+          themeOverride: { textDark: MODIFIED_BLUE },
+        }
+      }
+
+      const key = spec.key as keyof DataElement
+      const level = cellLevels.get(`${row}|${key}`)
       const tint = level ? CELL_TINT[level] : undefined
+
       if (spec.kind === 'boolean') {
         return {
           kind: GridCellKind.Boolean,
-          data: Boolean(element[spec.key]),
+          data: Boolean(element[key]),
           allowOverlay: false,
           ...(tint ? { themeOverride: { bgCell: tint } } : {}),
         }
       }
-      if (spec.kind === 'summary') {
-        const text = summarize(spec.key, element)
+      if (spec.kind === 'bubble') {
         return {
-          kind: GridCellKind.Text,
-          data: text,
-          displayData: text,
+          kind: GridCellKind.Bubble,
+          data: bubbles(key, element),
           allowOverlay: true,
-          readonly: true,
-          themeOverride: { textDark: '#888888', ...(tint ? { bgCell: tint } : {}) },
+          ...(tint ? { themeOverride: { bgCell: tint } } : {}),
         }
       }
-      const raw = element[spec.key as ScalarKey]
+      if (spec.kind === 'markdown') {
+        const text = (element.description ?? '') as string
+        return {
+          kind: GridCellKind.Markdown,
+          data: text,
+          allowOverlay: true,
+          ...(tint ? { themeOverride: { bgCell: tint } } : {}),
+        }
+      }
+
+      const raw = element[key as ScalarKey]
       const text = raw == null ? '' : String(raw)
+      // Section, cardinality, and datatype are custom-drawn as colored pills
+      // (drawCell below) while remaining ordinary editable text cells.
+      const over: Record<string, string> = {}
+      if (tint) over.bgCell = tint
       return {
         kind: GridCellKind.Text,
         data: text,
         displayData: text,
         allowOverlay: true,
-        ...(tint ? { themeOverride: { bgCell: tint } } : {}),
+        allowWrapping: wrapText,
+        ...(Object.keys(over).length > 0 ? { themeOverride: over } : {}),
       }
     },
-    [doc, cellLevels],
+    [doc, cellLevels, baselineRefs, wrapText],
   )
 
   const onCellEdited = useCallback(
     ([col, row]: Item, newValue: EditableGridCell) => {
       const spec = COLUMNS[col]
-      if (!spec || spec.kind === 'summary') return
+      if (!spec || spec.kind === 'modified' || spec.kind === 'bubble') return
       if (newValue.kind === GridCellKind.Boolean && spec.key === 'required') {
         apply((d) => setField(d, row, 'required', Boolean(newValue.data)))
+        return
+      }
+      if (newValue.kind === GridCellKind.Markdown && spec.key === 'description') {
+        const text = newValue.data
+        apply((d) => setField(d, row, 'description', text === '' ? null : text))
         return
       }
       if (newValue.kind !== GridCellKind.Text) return
@@ -255,6 +336,41 @@ export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gri
     if (column.id) setWidths((w) => ({ ...w, [column.id as string]: newSize }))
   }, [])
 
+  // Custom canvas rendering: section / cardinality / datatype draw as colored
+  // pills. The cells stay ordinary Text cells, so overlay editing, copy/paste,
+  // and search all keep working; only the painting changes. The validation
+  // background (painted before content) still shows around the pill.
+  const drawCell: DrawCellCallback = useCallback((args, drawContent) => {
+    const { ctx, rect, col, cell, theme } = args
+    const spec = COLUMNS[col]
+    const key = spec?.key
+    if (
+      (key === 'section' || key === 'cardinality' || key === 'datatype') &&
+      cell.kind === GridCellKind.Text &&
+      cell.displayData !== ''
+    ) {
+      const text = cell.displayData
+      const { bg, fg } = pillColors(key, text)
+      ctx.save()
+      ctx.font = `12px ${theme.fontFamily}`
+      const width = Math.min(ctx.measureText(text).width + 16, rect.width - 12)
+      const height = 20
+      const x = rect.x + 6
+      const y = rect.y + (rect.height - height) / 2
+      ctx.beginPath()
+      ctx.roundRect(x, y, width, height, 10)
+      ctx.fillStyle = bg
+      ctx.fill()
+      ctx.clip() // keep long text inside the pill
+      ctx.fillStyle = fg
+      ctx.textBaseline = 'middle'
+      ctx.fillText(text, x + 8, y + height / 2 + 0.5)
+      ctx.restore()
+    } else {
+      drawContent()
+    }
+  }, [])
+
   return (
     <DataEditor
       ref={gridRef}
@@ -262,6 +378,7 @@ export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gri
       rows={doc.elements.length}
       getCellContent={getCellContent}
       onCellEdited={onCellEdited}
+      drawCell={drawCell}
       onRowAppended={onRowAppended}
       onRowMoved={onRowMoved}
       onDelete={onDelete}
@@ -271,12 +388,13 @@ export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gri
       showSearch={showSearch}
       onSearchClose={onSearchClose}
       rowMarkers="both"
-      freezeColumns={1}
+      freezeColumns={2}
       getCellsForSelection={true}
       onPaste={true}
       trailingRowOptions={{ sticky: true, tint: true, hint: 'add element…' }}
       width="100%"
       height="100%"
+      rowHeight={wrapText ? 72 : 34}
       smoothScrollX
       smoothScrollY
       theme={{

@@ -58,3 +58,27 @@ describe('apply + undo/redo', () => {
     expect(s().dirty).toBe(false)
   })
 })
+
+describe('baseline (modified tracking)', () => {
+  it('elements keep baseline identity until touched, and regain it on undo', () => {
+    const s = () => useEditor.getState()
+    s().apply((d) => insertElement(d, 0, { ...emptyElement(), id: 'a' }))
+    s().apply((d) => insertElement(d, 1, { ...emptyElement(), id: 'b' }))
+    s().markSaved('/tmp/x.csv') // save: current doc becomes the baseline
+
+    const baselineRefs = new Set(s().baseline.elements)
+    s().apply((d) => setField(d, 0, 'label', 'Touched'))
+    expect(baselineRefs.has(s().doc.elements[0])).toBe(false) // modified
+    expect(baselineRefs.has(s().doc.elements[1])).toBe(true) // untouched
+
+    s().undo() // back to the exact baseline object -> clean again
+    expect(baselineRefs.has(s().doc.elements[0])).toBe(true)
+  })
+
+  it('loadDocument resets the baseline to the loaded document', () => {
+    const s = () => useEditor.getState()
+    const doc = newDocument()
+    s().loadDocument(doc, '/tmp/z.csv')
+    expect(s().baseline).toBe(doc)
+  })
+})

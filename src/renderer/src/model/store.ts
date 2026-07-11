@@ -12,6 +12,13 @@ const UNDO_LIMIT = 200
 
 export interface EditorState {
   doc: DdDocument
+  /**
+   * The document as of open / last save. Because mutations share structure
+   * (document.ts), an element is unmodified iff its object is reference-
+   * present in the baseline — undoing back to the original even clears the
+   * modified state exactly.
+   */
+  baseline: DdDocument
   /** Absolute path of the file this document was opened from; null = untitled. */
   filePath: string | null
   dirty: boolean
@@ -34,13 +41,21 @@ export interface EditorState {
 
 export const useEditor = create<EditorState>((set, get) => ({
   doc: newDocument(),
+  baseline: newDocument(),
   filePath: null,
   dirty: false,
   undoStack: [],
   redoStack: [],
 
   loadDocument: (doc, filePath, dirty) =>
-    set({ doc, filePath, dirty: dirty ?? filePath === null, undoStack: [], redoStack: [] }),
+    set({
+      doc,
+      baseline: doc,
+      filePath,
+      dirty: dirty ?? filePath === null,
+      undoStack: [],
+      redoStack: [],
+    }),
 
   apply: (mutate) => {
     const { doc, undoStack } = get()
@@ -78,5 +93,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     })
   },
 
-  markSaved: (filePath) => set({ filePath, dirty: false }),
+  // Saving establishes the current document as the new baseline.
+  markSaved: (filePath) => set({ filePath, dirty: false, baseline: get().doc }),
 }))

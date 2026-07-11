@@ -70,13 +70,24 @@ button.primary:hover { filter: brightness(1.08); }
 /* --------------------------------------------------------- right panel */
 
 .panel {
-  width: 400px;
-  min-width: 300px;
+  position: relative;              /* anchors the resize handle */
+  min-width: 280px;
+  max-width: 800px;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
   background: #fff;
 }
+.panel-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.panel-resizer:hover { background: var(--accent); opacity: 0.35; }
 .panel .tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
@@ -166,6 +177,57 @@ pre.preview.stale { opacity: 0.5; }
 }
 .enum-item .remove:hover { color: var(--danger); background: transparent; border: none; }
 .add-item { margin-top: 2px; font-size: 12px; padding: 3px 9px; }
+
+/* ------------------------------------------------- modified indicators */
+
+.mod-dot { color: var(--accent); font-size: 9px; vertical-align: 2px; margin-left: 3px; }
+
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 10px;
+  margin-bottom: 4px;
+}
+.chip.modified { background: var(--accent-soft); color: var(--accent); }
+.chip.new { background: #e6f6ec; color: #1a7f37; }
+
+button.toggled {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ------------------------------------------------- description markdown */
+
+.mode-toggle { float: right; display: inline-flex; gap: 1px; }
+.mode-toggle button {
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 0;
+  color: var(--text-dim);
+}
+.mode-toggle button:first-child { border-radius: 5px 0 0 5px; }
+.mode-toggle button:last-child { border-radius: 0 5px 5px 0; }
+.mode-toggle button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+.md-preview {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fcfcfd;
+  font-size: 13px;
+  overflow-wrap: break-word;
+}
+.md-preview > :first-child { margin-top: 0; }
+.md-preview > :last-child { margin-bottom: 0; }
+.md-preview code {
+  background: #f0f1f3;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
 
 /* ------------------------------------------------------------ problems */
 

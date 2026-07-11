@@ -1,10 +1,14 @@
 /**
  * The element inspector: full structured editing of the selected element —
- * dropdowns for datatype (from /meta) and cardinality, multiline text for
- * description/notes, one-per-line editors for the string lists, and
+ * dropdowns for datatype (from /meta) and cardinality, a Markdown editor with
+ * preview for the description, one-per-line editors for the string lists, and
  * value/label/IRI item editors for enumeration and missing-value codes.
- * The grid is for bulk work; this panel is for detail work.
+ *
+ * Fields changed since open / last save carry a blue dot; a brand-new element
+ * carries a "new" chip instead (every field would otherwise be dotted).
  */
+import { marked } from 'marked'
+import { useMemo, useState } from 'react'
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea } from './inputs'
@@ -18,8 +22,11 @@ type ItemsKey = 'enumeration' | 'missing_value_codes'
 
 export function ElementInspector({ row, datatypes }: { row: number | null; datatypes: string[] }) {
   const doc = useEditor((s) => s.doc)
+  const baseline = useEditor((s) => s.baseline)
   const apply = useEditor((s) => s.apply)
   const element = row === null ? undefined : doc.elements[row]
+
+  const baselineRefs = useMemo(() => new Set<DataElement>(baseline.elements), [baseline])
 
   if (row === null || element === undefined) {
     return (
@@ -29,6 +36,20 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
     )
   }
   const index = row
+
+  // Modified-state: untouched elements are reference-identical to the
+  // baseline; for touched ones, diff field-by-field against the baseline
+  // element with the same id (id edits make it effectively new).
+  const untouched = baselineRefs.has(element)
+  const counterpart = untouched ? element : baseline.elements.find((e) => e.id === element.id)
+  const isNew = !untouched && counterpart === undefined
+  const changed = (key: keyof DataElement): boolean => {
+    if (untouched || isNew || counterpart === undefined) return false
+    return JSON.stringify(element[key] ?? null) !== JSON.stringify(counterpart[key] ?? null)
+  }
+
+  const Dot = ({ k }: { k: keyof DataElement }) =>
+    changed(k) ? <span className="mod-dot" title="Modified since open / last save">●</span> : null
 
   const commitText = (key: 'id' | 'label' | 'datatype') => (value: string) =>
     apply((d) => setField(d, index, key, value))
@@ -47,24 +68,27 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
 
   return (
     <div className="inspector">
+      {isNew ? <span className="chip new">new element</span> : null}
+      {!isNew && !untouched ? <span className="chip modified">modified</span> : null}
+
       <h3>Identity</h3>
       <label className="field">
-        <span>Id (variable name)</span>
+        <span>Id (variable name) <Dot k="id" /></span>
         <CommitInput value={element.id} onCommit={commitText('id')} />
       </label>
       <label className="field">
-        <span>Label</span>
+        <span>Label <Dot k="label" /></span>
         <CommitInput value={element.label} onCommit={commitText('label')} />
       </label>
       <label className="field">
-        <span>Section</span>
+        <span>Section <Dot k="section" /></span>
         <CommitInput value={text('section')} onCommit={commitNullable('section')} />
       </label>
 
       <h3>Type</h3>
       <div className="row2">
         <label className="field">
-          <span>Datatype</span>
+          <span>Datatype <Dot k="datatype" /></span>
           <select
             value={element.datatype}
             onChange={(e) => apply((d) => setField(d, index, 'datatype', e.target.value))}
@@ -79,7 +103,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           </select>
         </label>
         <label className="field">
-          <span>Cardinality</span>
+          <span>Cardinality <Dot k="cardinality" /></span>
           <select
             value={element.cardinality}
             onChange={(e) =>
@@ -99,68 +123,116 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           checked={element.required}
           onChange={(e) => apply((d) => setField(d, index, 'required', e.target.checked))}
         />
-        Required
+        Required <Dot k="required" />
       </label>
       <div className="row2">
         <label className="field">
-          <span>Unit</span>
+          <span>Unit <Dot k="unit" /></span>
           <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
         </label>
         <label className="field">
-          <span>Pattern (regex)</span>
+          <span>Pattern (regex) <Dot k="pattern" /></span>
           <CommitInput value={text('pattern')} onCommit={commitNullable('pattern')} />
         </label>
       </div>
       <label className="field">
-        <span>Precondition</span>
+        <span>Precondition <Dot k="precondition" /></span>
         <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />
       </label>
 
-      <h3>Enumeration</h3>
+      <h3>Enumeration <Dot k="enumeration" /></h3>
       <EnumItemsEditor items={items('enumeration')} onChange={(n) => commitItems('enumeration', n)} />
 
-      <h3>Missing-value codes</h3>
+      <h3>Missing-value codes <Dot k="missing_value_codes" /></h3>
       <EnumItemsEditor
         items={items('missing_value_codes')}
         onChange={(n) => commitItems('missing_value_codes', n)}
       />
 
       <h3>Documentation</h3>
+      <DescriptionField
+        value={text('description')}
+        changed={changed('description')}
+        onCommit={commitNullable('description')}
+      />
       <label className="field">
-        <span>Description</span>
-        <CommitTextarea value={text('description')} onCommit={commitNullable('description')} rows={4} />
-      </label>
-      <label className="field">
-        <span>Notes</span>
+        <span>Notes <Dot k="notes" /></span>
         <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={2} />
       </label>
       <div className="row2">
         <label className="field">
-          <span>Provenance</span>
+          <span>Provenance <Dot k="provenance" /></span>
           <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
         </label>
         <label className="field">
-          <span>See also (URL)</span>
+          <span>See also (URL) <Dot k="see_also" /></span>
           <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
         </label>
       </div>
 
       <h3>Lists</h3>
       <label className="field">
-        <span>Ontology terms — one per line</span>
+        <span>Ontology terms — one per line <Dot k="terms" /></span>
         <CommitTextarea value={listText('terms')} onCommit={commitList('terms')} rows={2} />
       </label>
       <div className="row2">
         <label className="field">
-          <span>Aliases — one per line</span>
+          <span>Aliases — one per line <Dot k="aliases" /></span>
           <CommitTextarea value={listText('aliases')} onCommit={commitList('aliases')} rows={2} />
         </label>
         <label className="field">
-          <span>Examples — one per line</span>
+          <span>Examples — one per line <Dot k="examples" /></span>
           <CommitTextarea value={listText('examples')} onCommit={commitList('examples')} rows={2} />
         </label>
       </div>
     </div>
+  )
+}
+
+/**
+ * Description editor with a Markdown preview toggle. Rendering uses marked
+ * (already a grid dependency); the app's CSP has no unsafe-inline script-src,
+ * so markdown-injected handlers/scripts cannot execute.
+ */
+function DescriptionField({
+  value,
+  changed,
+  onCommit,
+}: {
+  value: string
+  changed: boolean
+  onCommit: (value: string) => void
+}) {
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit')
+  const html = useMemo(
+    () => (mode === 'preview' ? (marked.parse(value || '*no description*') as string) : ''),
+    [mode, value],
+  )
+
+  return (
+    <label className="field">
+      <span>
+        Description — Markdown{' '}
+        {changed ? <span className="mod-dot" title="Modified since open / last save">●</span> : null}
+        <span className="mode-toggle">
+          <button type="button" className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
+            edit
+          </button>
+          <button
+            type="button"
+            className={mode === 'preview' ? 'active' : ''}
+            onClick={() => setMode('preview')}
+          >
+            preview
+          </button>
+        </span>
+      </span>
+      {mode === 'edit' ? (
+        <CommitTextarea value={value} onCommit={onCommit} rows={5} />
+      ) : (
+        <div className="md-preview" dangerouslySetInnerHTML={{ __html: html }} />
+      )}
+    </label>
   )
 }
 

@@ -95,10 +95,42 @@ const REDCAP_FILTERS = [
   { name: 'All files', extensions: ['*'] },
 ]
 
+// Tiny persisted settings: currently just the folder last used in a file
+// dialog, so Open re-opens where the user actually works.
+const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
+let settings: { lastDir?: string } | null = null
+
+async function getSettings(): Promise<{ lastDir?: string }> {
+  if (settings === null) {
+    try {
+      settings = JSON.parse(await readFile(settingsPath(), 'utf8'))
+    } catch {
+      settings = {}
+    }
+  }
+  return settings!
+}
+
+async function rememberDir(filePath: string): Promise<void> {
+  const s = await getSettings()
+  s.lastDir = path.dirname(filePath)
+  try {
+    await writeFile(settingsPath(), JSON.stringify(s), 'utf8')
+  } catch {
+    /* remembering the folder is best-effort */
+  }
+}
+
 async function openAndRead(filters: typeof DICTIONARY_FILTERS) {
-  const res = await dialog.showOpenDialog({ properties: ['openFile'], filters })
+  const { lastDir } = await getSettings()
+  const res = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters,
+    ...(lastDir ? { defaultPath: lastDir } : {}),
+  })
   const file = res.filePaths[0]
   if (res.canceled || !file) return null
+  void rememberDir(file)
   return { path: file, content: await readFile(file, 'utf8') }
 }
 
@@ -109,8 +141,17 @@ ipcMain.handle('sidecar-info', () => ({
 ipcMain.handle('dialog:open', () => openAndRead(DICTIONARY_FILTERS))
 ipcMain.handle('dialog:open-redcap', () => openAndRead(REDCAP_FILTERS))
 ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
-  const res = await dialog.showSaveDialog({ defaultPath: defaultName, filters: DICTIONARY_FILTERS })
-  return res.canceled || !res.filePath ? null : res.filePath
+  // An absolute default (Save on an already-saved file) wins; otherwise
+  // suggest the last-used folder.
+  const { lastDir } = await getSettings()
+  const defaultPath =
+    path.isAbsolute(defaultName) ? defaultName
+    : lastDir ? path.join(lastDir, defaultName)
+    : defaultName
+  const res = await dialog.showSaveDialog({ defaultPath, filters: DICTIONARY_FILTERS })
+  if (res.canceled || !res.filePath) return null
+  void rememberDir(res.filePath)
+  return res.filePath
 })
 ipcMain.handle('file:save', async (_event, filePath: string, content: string) => {
   await writeFile(filePath, content, 'utf8')
