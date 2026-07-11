@@ -9,6 +9,10 @@
  */
 import { marked } from 'marked'
 import { useMemo, useState } from 'react'
+
+// The REDCap converter (and hand-written dictionaries) separate paragraphs
+// with single newlines; without breaks, marked would join them into one blob.
+marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea } from './inputs'

@@ -54,6 +54,97 @@ const HEADER_TO_KEY: Record<string, keyof DataElement> = {
   SeeAlso: 'see_also',
 }
 
+// One font for painting AND measuring: wrap layout is only correct when the
+// line-count measurement uses exactly the font the cells are drawn with.
+const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", sans-serif'
+const BASE_FONT = `13px ${FONT_FAMILY}`
+const LINE_HEIGHT = 17
+const MIN_ROW_HEIGHT = 34
+const MAX_ROW_HEIGHT = 400
+
+let measureCtx: CanvasRenderingContext2D | null = null
+function getMeasureCtx(): CanvasRenderingContext2D {
+  if (measureCtx === null) {
+    measureCtx = document.createElement('canvas').getContext('2d')!
+  }
+  measureCtx.font = BASE_FONT
+  return measureCtx
+}
+
+const PARA_GAP = 8 // extra space between paragraphs, on top of the line height
+
+/**
+ * Word-wrap text to a pixel width, paragraph-aware: newlines split paragraphs
+ * (the REDCap converter emits single newlines between logical paragraphs),
+ * and each paragraph wraps independently. Used by draw AND measure so the
+ * two always agree.
+ */
+function wrapParagraphs(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string[][] {
+  const paragraphs: string[][] = []
+  for (const paragraph of text.split(/\n+/)) {
+    if (paragraph.trim() === '') continue
+    const lines: string[] = []
+    let line = ''
+    for (const word of paragraph.split(/\s+/)) {
+      const candidate = line === '' ? word : `${line} ${word}`
+      if (line !== '' && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(line)
+        line = word
+      } else {
+        line = candidate
+      }
+    }
+    if (line !== '') lines.push(line)
+    paragraphs.push(lines)
+  }
+  return paragraphs
+}
+
+// Text heights are cached per (width, text): recomputing row heights on every
+// keystroke would otherwise re-measure every cell of every row.
+const textHeightCache = new Map<string, number>()
+function wrappedTextHeight(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): number {
+  const key = `${Math.round(maxWidth)}|${text}`
+  const hit = textHeightCache.get(key)
+  if (hit !== undefined) return hit
+  if (textHeightCache.size > 20_000) textHeightCache.clear() // crude but sufficient
+  const paragraphs = wrapParagraphs(ctx, text, maxWidth)
+  const lines = paragraphs.reduce((n, p) => n + p.length, 0)
+  const height = lines * LINE_HEIGHT + Math.max(0, paragraphs.length - 1) * PARA_GAP
+  textHeightCache.set(key, height)
+  return height
+}
+
+/**
+ * Canvas cells can't render HTML, so descriptions display as markdown with
+ * the syntax stripped (bold/italic/code markers, link targets, headings) —
+ * clean prose in the cell; the overlay still shows fully rendered markdown.
+ */
+const stripCache = new Map<string, string>()
+function stripMarkdown(md: string): string {
+  const hit = stripCache.get(md)
+  if (hit !== undefined) return hit
+  if (stripCache.size > 5000) stripCache.clear()
+  const out = md
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)([\s\S]*?)\1/g, '$2')
+    .replace(/(^|\W)[*_]([^*_\n][^*_]*?)[*_](?=\W|$)/g, '$1$2')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+  stripCache.set(md, out)
+  return out
+}
+
 const ROW_TINT: Record<FindingLevel, string | undefined> = {
   ERROR: '#fdf1f1',
   WARNING: '#fdf8ec',
@@ -205,6 +296,26 @@ export function GridView({
     () => COLUMNS.map((c) => ({ id: c.key, title: c.title, width: widths[c.key] ?? c.width })),
     [widths],
   )
+
+  // In wrap mode every row is exactly as tall as its tallest wrapped cell
+  // (text and stripped-markdown columns, at their current widths). The
+  // per-(width, text) cache keeps this cheap across keystrokes.
+  const rowHeights = useMemo<number[] | null>(() => {
+    if (!wrapText) return null
+    const ctx = getMeasureCtx()
+    return doc.elements.map((element) => {
+      let tallest = LINE_HEIGHT
+      for (const spec of COLUMNS) {
+        if (spec.kind !== 'text' && spec.kind !== 'markdown') continue
+        const value = element[spec.key as keyof DataElement]
+        if (typeof value !== 'string' || value === '') continue
+        const text = spec.kind === 'markdown' ? stripMarkdown(value) : value
+        const width = (widths[spec.key] ?? spec.width) - 16
+        tallest = Math.max(tallest, wrappedTextHeight(ctx, text, width))
+      }
+      return Math.min(MAX_ROW_HEIGHT, Math.max(MIN_ROW_HEIGHT, tallest + 12))
+    })
+  }, [doc, widths, wrapText])
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
@@ -375,41 +486,48 @@ export function GridView({
         return
       }
 
-      const wrappable =
-        (cell.kind === GridCellKind.Text || cell.kind === GridCellKind.Markdown) &&
-        typeof (cell as { data?: unknown }).data === 'string'
-      const wrapData = wrappable ? ((cell as { data: string }).data ?? '') : ''
-      if (wrapText && wrappable && wrapData.length > 0) {
+      // Text-ish cells: markdown descriptions ALWAYS custom-draw (with the
+      // syntax stripped, so cells show clean prose without clicking); plain
+      // text cells custom-draw only in wrap mode.
+      const isMarkdown = cell.kind === GridCellKind.Markdown
+      const isText = cell.kind === GridCellKind.Text
+      const raw =
+        (isMarkdown || isText) && typeof (cell as { data?: unknown }).data === 'string'
+          ? (cell as { data: string }).data
+          : ''
+      const display = isMarkdown ? stripMarkdown(raw) : raw
+      if ((wrapText || isMarkdown) && display.length > 0) {
         const pad = theme.cellHorizontalPadding
         const maxWidth = rect.width - pad * 2
         ctx.save()
         ctx.beginPath()
         ctx.rect(rect.x, rect.y, rect.width, rect.height)
         ctx.clip()
-        ctx.font = `${theme.baseFontStyle} ${theme.fontFamily}`
+        ctx.font = BASE_FONT
         ctx.fillStyle = theme.textDark
         ctx.textBaseline = 'middle'
-        const lineHeight = 17
-        let y = rect.y + theme.cellVerticalPadding + lineHeight / 2 + 1
-        const bottom = rect.y + rect.height
-        outer: for (const paragraph of wrapData.split('\n')) {
-          let line = ''
-          for (const word of paragraph.split(/\s+/)) {
-            const candidate = line === '' ? word : `${line} ${word}`
-            if (line !== '' && ctx.measureText(candidate).width > maxWidth) {
+        if (wrapText) {
+          // Paragraph-aware wrapped layout, drawn from the top.
+          let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+          const bottom = rect.y + rect.height
+          const paragraphs = wrapParagraphs(ctx, display, maxWidth)
+          outer: for (let p = 0; p < paragraphs.length; p++) {
+            if (p > 0) y += PARA_GAP
+            for (const line of paragraphs[p]) {
               ctx.fillText(line, rect.x + pad, y)
-              y += lineHeight
+              y += LINE_HEIGHT
               if (y > bottom) break outer
-              line = word
-            } else {
-              line = candidate
             }
           }
-          if (line !== '') {
-            ctx.fillText(line, rect.x + pad, y)
-            y += lineHeight
-            if (y > bottom) break
+        } else {
+          // Single line, ellipsized (markdown-only path when wrap is off).
+          let line = display.replace(/\s*\n+\s*/g, '  ')
+          const width = ctx.measureText(line).width
+          if (width > maxWidth) {
+            const keep = Math.max(1, Math.floor((line.length * maxWidth) / width) - 1)
+            line = `${line.slice(0, keep)}…`
           }
+          ctx.fillText(line, rect.x + pad, rect.y + rect.height / 2 + 1)
         }
         ctx.restore()
         return
@@ -443,7 +561,11 @@ export function GridView({
       trailingRowOptions={{ sticky: true, tint: true, hint: 'add element…' }}
       width="100%"
       height="100%"
-      rowHeight={wrapText ? 72 : 34}
+      rowHeight={
+        wrapText && rowHeights !== null
+          ? (row: number) => rowHeights[row] ?? MIN_ROW_HEIGHT
+          : MIN_ROW_HEIGHT
+      }
       smoothScrollX
       smoothScrollY
       theme={{
@@ -451,6 +573,7 @@ export function GridView({
         accentLight: '#eff6ff',
         headerFontStyle: '600 12px',
         baseFontStyle: '13px',
+        fontFamily: FONT_FAMILY, // must match BASE_FONT so measure == draw
         bgHeader: '#f6f8fa',
         textHeader: '#1f2328',
         borderColor: '#e9ecef',
