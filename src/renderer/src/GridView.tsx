@@ -681,11 +681,12 @@ export function GridView({
         return
       }
 
-      // Pill lists (enumeration, terms, ...): when the column wraps, flow the
-      // pills across as many rows as the cell height allows — all values
-      // visible, no "+n more".
+      // Pill lists (enumeration, terms, ...): draw our own flowed pills when
+      // the column wraps (all values, no "+n more") OR when the row is tall
+      // (so the pills top-align with sibling cells instead of centering).
       const colWrapped = spec !== undefined && wrappedCols.has(spec.key as string)
-      if (colWrapped && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
+      const tallRow = rect.height > MIN_ROW_HEIGHT + 2
+      if ((colWrapped || tallRow) && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
         ctx.save()
         ctx.beginPath()
         ctx.rect(rect.x, rect.y, rect.width, rect.height)
@@ -778,7 +779,6 @@ export function GridView({
       // when the row is taller than one line (so short cells in a tall wrapped
       // row sit at the top instead of floating in the middle). Ordinary
       // single-line rows fall through to GDG's default renderer.
-      const tallRow = rect.height > MIN_ROW_HEIGHT + 2
       if (isText && raw.length > 0 && (colWrapped || tallRow)) {
         const maxWidth = rect.width - pad * 2
         ctx.save()
