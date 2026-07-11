@@ -239,7 +239,7 @@ pre.preview.stale { opacity: 0.5; }
   display: grid;
   grid-template-columns: 80px 1fr 24px;
   gap: 5px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
   align-items: center;
 }
 /* The value is the stored code — render the input as a blue code chip,
