@@ -8,7 +8,7 @@
 import type { DataEditorRef } from '@glideapps/glide-data-grid'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ElementInspector } from './ElementInspector'
-import { GridView } from './GridView'
+import { GridView, WRAPPABLE_KEYS } from './GridView'
 import {
   IconError,
   IconImport,
@@ -43,7 +43,30 @@ export function App() {
   const [cursorRow, setCursorRow] = useState<number | null>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [findings, setFindings] = useState<Finding[]>([])
-  const [wrapText, setWrapText] = useState(false)
+  // Per-column wrap (persisted): toggled per column via the header chevron
+  // menu; the toolbar button wraps/unwraps all wrappable columns at once.
+  const [wrappedCols, setWrappedCols] = useState<ReadonlySet<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('dd-edit.wrappedCols') ?? '[]')
+      return new Set(Array.isArray(stored) ? stored : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const [headerMenu, setHeaderMenu] = useState<{ key: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    localStorage.setItem('dd-edit.wrappedCols', JSON.stringify([...wrappedCols]))
+  }, [wrappedCols])
+
+  const toggleWrapCol = useCallback((key: string) => {
+    setWrappedCols((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
   const [panelWidth, setPanelWidth] = useState(() => {
     const stored = Number(localStorage.getItem('dd-edit.panelWidth'))
     return stored >= 280 && stored <= 800 ? stored : 400
@@ -269,9 +292,11 @@ export function App() {
         </div>
         <button onClick={() => setShowSearch(true)} title="Search (⌘F)"><IconSearch />Search</button>
         <button
-          className={wrapText ? 'toggled' : ''}
-          onClick={() => setWrapText((v) => !v)}
-          title="Wrap long text in cells"
+          className={wrappedCols.size > 0 ? 'toggled' : ''}
+          onClick={() =>
+            setWrappedCols(wrappedCols.size > 0 ? new Set() : new Set(WRAPPABLE_KEYS))
+          }
+          title="Wrap / unwrap all columns — or per column via its header menu (▾)"
         >
           Wrap
         </button>
@@ -328,7 +353,8 @@ export function App() {
                 showSearch={showSearch}
                 onSearchClose={() => setShowSearch(false)}
                 findings={findings}
-                wrapText={wrapText}
+                wrappedCols={wrappedCols}
+                onHeaderMenu={(key, pos) => setHeaderMenu({ key, ...pos })}
                 gridRef={gridRef}
               />
             </div>
@@ -363,6 +389,23 @@ export function App() {
           </>
         )}
       </div>
+
+      {headerMenu ? (
+        <>
+          <div className="menu-backdrop" onClick={() => setHeaderMenu(null)} />
+          <div className="header-menu" style={{ left: headerMenu.x, top: headerMenu.y }}>
+            <button
+              onClick={() => {
+                toggleWrapCol(headerMenu.key)
+                setHeaderMenu(null)
+              }}
+            >
+              <span className="check">{wrappedCols.has(headerMenu.key) ? '✓' : ''}</span>
+              Wrap text
+            </button>
+          </div>
+        </>
+      ) : null}
 
       <footer className="statusbar">
         <span>{doc.elements.length} elements</span>

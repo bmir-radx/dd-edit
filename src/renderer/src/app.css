@@ -272,6 +272,33 @@ button.toggled {
   max-width: 190px;
 }
 
+/* --------------------------------------------------- header column menu */
+
+.menu-backdrop { position: fixed; inset: 0; z-index: 90; }
+.header-menu {
+  position: fixed;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  min-width: 140px;
+}
+.header-menu button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: transparent;
+}
+.header-menu button:hover { background: var(--accent-soft); }
+.header-menu .check { width: 14px; color: var(--accent); font-weight: 700; }
+
 /* ------------------------------------------------------------- footer */
 
 .statusbar {

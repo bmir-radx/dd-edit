@@ -171,13 +171,10 @@ function datatypePill(datatype: string): { bg: string; fg: string } {
   return { bg: '#f1f5f9', fg: '#475569' } // text / other
 }
 
-/** Pill colors for the three categorical columns (all stay editable). */
-function pillColors(key: 'section' | 'cardinality' | 'datatype', text: string) {
+/** Pill colors for the categorical columns (both stay editable). */
+function pillColors(key: 'cardinality' | 'datatype', text: string) {
   if (key === 'datatype') return datatypePill(text)
-  if (key === 'cardinality') {
-    return text === 'multiple' ? { bg: '#ede9fe', fg: '#6d28d9' } : { bg: '#f1f5f9', fg: '#475569' }
-  }
-  return { bg: sectionTint(text), fg: '#374151' }
+  return text === 'multiple' ? { bg: '#ede9fe', fg: '#6d28d9' } : { bg: '#f1f5f9', fg: '#475569' }
 }
 
 /** A stable pastel per section name (hash -> hue), light enough for text. */
@@ -231,19 +228,46 @@ const COLUMNS: ColumnSpec[] = [
   { key: 'see_also', title: 'See also', width: 180, kind: 'text', nullable: true },
 ]
 
+/** Column keys that can wrap: text-bearing columns and pill lists. */
+export const WRAPPABLE_KEYS: string[] = COLUMNS.filter(
+  (c) => c.kind === 'text' || c.kind === 'markdown' || c.kind === 'bubble',
+).map((c) => c.key as string)
+
 const BUBBLE_CAP = 6
 
-function bubbles(key: keyof DataElement, element: DataElement): string[] {
+function bubbles(key: keyof DataElement, element: DataElement, capped: boolean): string[] {
   let all: string[]
   if (key === 'enumeration' || key === 'missing_value_codes') {
     all = ((element[key] ?? []) as EnumItem[]).map((i) => `${i.value} = ${i.label}`)
   } else {
     all = (element[key] ?? []) as string[]
   }
-  if (all.length > BUBBLE_CAP) {
+  if (capped && all.length > BUBBLE_CAP) {
     return [...all.slice(0, BUBBLE_CAP), `+${all.length - BUBBLE_CAP} more`]
   }
   return all
+}
+
+// Pill flow-layout constants shared by drawing and height measurement.
+const PILL_H = 18
+const PILL_GAP = 4
+const PILL_PAD_X = 8
+const PILL_FONT = `12px ${FONT_FAMILY}`
+
+/** Rows of pills after flow-wrapping into maxWidth. */
+function bubbleRows(ctx: CanvasRenderingContext2D, items: string[], maxWidth: number): number {
+  ctx.font = PILL_FONT
+  let rows = 1
+  let x = 0
+  for (const item of items) {
+    const w = Math.min(ctx.measureText(item).width + PILL_PAD_X * 2, maxWidth)
+    if (x > 0 && x + w > maxWidth) {
+      rows++
+      x = 0
+    }
+    x += w + PILL_GAP
+  }
+  return rows
 }
 
 export interface GridViewProps {
@@ -252,8 +276,10 @@ export interface GridViewProps {
   showSearch: boolean
   onSearchClose: () => void
   findings: Finding[]
-  /** Wrap long text in cells (rows grow taller). */
-  wrapText: boolean
+  /** Column keys whose text wraps (rows grow to fit). Per-column, via header menus. */
+  wrappedCols: ReadonlySet<string>
+  /** A wrappable column's header menu chevron was clicked. */
+  onHeaderMenu: (key: string, position: { x: number; y: number }) => void
   /** For imperative scrolling (problems panel, section jumper). */
   gridRef?: Ref<DataEditorRef>
 }
@@ -263,7 +289,8 @@ export function GridView({
   showSearch,
   onSearchClose,
   findings,
-  wrapText,
+  wrappedCols,
+  onHeaderMenu,
   gridRef,
 }: GridViewProps) {
   const doc = useEditor((s) => s.doc)
@@ -293,29 +320,43 @@ export function GridView({
   }, [findings])
 
   const columns = useMemo<GridColumn[]>(
-    () => COLUMNS.map((c) => ({ id: c.key, title: c.title, width: widths[c.key] ?? c.width })),
+    () =>
+      COLUMNS.map((c) => ({
+        id: c.key,
+        title: c.title,
+        width: widths[c.key] ?? c.width,
+        // Wrappable columns get a header chevron -> per-column wrap menu.
+        hasMenu: WRAPPABLE_KEYS.includes(c.key as string),
+      })),
     [widths],
   )
 
-  // In wrap mode every row is exactly as tall as its tallest wrapped cell
-  // (text and stripped-markdown columns, at their current widths). The
+  // Every row is exactly as tall as its tallest wrapped cell (text,
+  // stripped-markdown, and pill-list columns, at their current widths). The
   // per-(width, text) cache keeps this cheap across keystrokes.
   const rowHeights = useMemo<number[] | null>(() => {
-    if (!wrapText) return null
+    if (wrappedCols.size === 0) return null
     const ctx = getMeasureCtx()
     return doc.elements.map((element) => {
       let tallest = LINE_HEIGHT
       for (const spec of COLUMNS) {
-        if (spec.kind !== 'text' && spec.kind !== 'markdown') continue
-        const value = element[spec.key as keyof DataElement]
-        if (typeof value !== 'string' || value === '') continue
-        const text = spec.kind === 'markdown' ? stripMarkdown(value) : value
+        if (!wrappedCols.has(spec.key as string)) continue
         const width = (widths[spec.key] ?? spec.width) - 16
-        tallest = Math.max(tallest, wrappedTextHeight(ctx, text, width))
+        if (spec.kind === 'text' || spec.kind === 'markdown') {
+          const value = element[spec.key as keyof DataElement]
+          if (typeof value !== 'string' || value === '') continue
+          const text = spec.kind === 'markdown' ? stripMarkdown(value) : value
+          tallest = Math.max(tallest, wrappedTextHeight(ctx, text, width))
+        } else if (spec.kind === 'bubble') {
+          const items = bubbles(spec.key as keyof DataElement, element, false)
+          if (items.length === 0) continue
+          const rows = bubbleRows(ctx, items, width)
+          tallest = Math.max(tallest, rows * (PILL_H + PILL_GAP) - PILL_GAP)
+        }
       }
       return Math.min(MAX_ROW_HEIGHT, Math.max(MIN_ROW_HEIGHT, tallest + 12))
     })
-  }, [doc, widths, wrapText])
+  }, [doc, widths, wrappedCols])
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
@@ -349,9 +390,10 @@ export function GridView({
         }
       }
       if (spec.kind === 'bubble') {
+        // Wrapped pill columns show everything; single-line ones cap at +n.
         return {
           kind: GridCellKind.Bubble,
-          data: bubbles(key, element),
+          data: bubbles(key, element, !wrappedCols.has(spec.key as string)),
           allowOverlay: true,
           ...(tint ? { themeOverride: { bgCell: tint } } : {}),
         }
@@ -368,20 +410,22 @@ export function GridView({
 
       const raw = element[key as ScalarKey]
       const text = raw == null ? '' : String(raw)
-      // Section, cardinality, and datatype are custom-drawn as colored pills
-      // (drawCell below) while remaining ordinary editable text cells.
+      // Cardinality and datatype are custom-drawn as colored pills (drawCell
+      // below) while remaining ordinary editable text cells; section shows
+      // its stable pastel as the cell background (validation tint wins).
       const over: Record<string, string> = {}
       if (tint) over.bgCell = tint
+      if (spec.key === 'section' && text !== '' && !tint) over.bgCell = sectionTint(text)
       return {
         kind: GridCellKind.Text,
         data: text,
         displayData: text,
         allowOverlay: true,
-        allowWrapping: wrapText,
+        allowWrapping: wrappedCols.has(spec.key as string), // multiline overlay editor
         ...(Object.keys(over).length > 0 ? { themeOverride: over } : {}),
       }
     },
-    [doc, cellLevels, baselineRefs, wrapText],
+    [doc, cellLevels, baselineRefs, wrappedCols],
   )
 
   const onCellEdited = useCallback(
@@ -462,7 +506,7 @@ export function GridView({
       const key = spec?.key
 
       if (
-        (key === 'section' || key === 'cardinality' || key === 'datatype') &&
+        (key === 'cardinality' || key === 'datatype') &&
         cell.kind === GridCellKind.Text &&
         cell.displayData !== ''
       ) {
@@ -486,9 +530,46 @@ export function GridView({
         return
       }
 
+      // Pill lists (enumeration, terms, ...): when the column wraps, flow the
+      // pills across as many rows as the cell height allows — all values
+      // visible, no "+n more".
+      const colWrapped = spec !== undefined && wrappedCols.has(spec.key as string)
+      if (colWrapped && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(rect.x, rect.y, rect.width, rect.height)
+        ctx.clip()
+        ctx.font = PILL_FONT
+        ctx.textBaseline = 'middle'
+        const left = rect.x + 6
+        const right = rect.x + rect.width - 6
+        let x = left
+        let y = rect.y + 5
+        for (const item of cell.data) {
+          const w = Math.min(ctx.measureText(item).width + PILL_PAD_X * 2, right - left)
+          if (x > left && x + w > right) {
+            x = left
+            y += PILL_H + PILL_GAP
+          }
+          if (y + PILL_H > rect.y + rect.height) break
+          ctx.beginPath()
+          ctx.roundRect(x, y, w, PILL_H, PILL_H / 2)
+          ctx.fillStyle = '#eef1f4'
+          ctx.fill()
+          ctx.save()
+          ctx.clip()
+          ctx.fillStyle = '#374151'
+          ctx.fillText(item, x + PILL_PAD_X, y + PILL_H / 2 + 0.5)
+          ctx.restore()
+          x += w + PILL_GAP
+        }
+        ctx.restore()
+        return
+      }
+
       // Text-ish cells: markdown descriptions ALWAYS custom-draw (with the
       // syntax stripped, so cells show clean prose without clicking); plain
-      // text cells custom-draw only in wrap mode.
+      // text cells custom-draw only when their column wraps.
       const isMarkdown = cell.kind === GridCellKind.Markdown
       const isText = cell.kind === GridCellKind.Text
       const raw =
@@ -496,7 +577,7 @@ export function GridView({
           ? (cell as { data: string }).data
           : ''
       const display = isMarkdown ? stripMarkdown(raw) : raw
-      if ((wrapText || isMarkdown) && display.length > 0) {
+      if ((colWrapped || isMarkdown) && display.length > 0) {
         const pad = theme.cellHorizontalPadding
         const maxWidth = rect.width - pad * 2
         ctx.save()
@@ -506,7 +587,7 @@ export function GridView({
         ctx.font = BASE_FONT
         ctx.fillStyle = theme.textDark
         ctx.textBaseline = 'middle'
-        if (wrapText) {
+        if (colWrapped) {
           // Paragraph-aware wrapped layout, drawn from the top.
           let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
           const bottom = rect.y + rect.height
@@ -535,7 +616,17 @@ export function GridView({
 
       drawContent()
     },
-    [wrapText],
+    [wrappedCols],
+  )
+
+  const onHeaderMenuClick = useCallback(
+    (col: number, bounds: { x: number; y: number; width: number; height: number }) => {
+      const spec = COLUMNS[col]
+      if (spec && WRAPPABLE_KEYS.includes(spec.key as string)) {
+        onHeaderMenu(spec.key as string, { x: bounds.x, y: bounds.y + bounds.height })
+      }
+    },
+    [onHeaderMenu],
   )
 
   return (
@@ -552,6 +643,7 @@ export function GridView({
       onColumnResize={onColumnResize}
       gridSelection={selection}
       onGridSelectionChange={onSelectionChange}
+      onHeaderMenuClick={onHeaderMenuClick}
       showSearch={showSearch}
       onSearchClose={onSearchClose}
       rowMarkers="both"
@@ -562,9 +654,7 @@ export function GridView({
       width="100%"
       height="100%"
       rowHeight={
-        wrapText && rowHeights !== null
-          ? (row: number) => rowHeights[row] ?? MIN_ROW_HEIGHT
-          : MIN_ROW_HEIGHT
+        rowHeights !== null ? (row: number) => rowHeights[row] ?? MIN_ROW_HEIGHT : MIN_ROW_HEIGHT
       }
       smoothScrollX
       smoothScrollY
