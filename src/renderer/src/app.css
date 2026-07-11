@@ -268,25 +268,42 @@ button.toggled {
 
 /* ------------------------------------------------- description markdown */
 
-.mode-toggle { float: right; display: inline-flex; gap: 1px; }
-.mode-toggle button {
-  padding: 0 8px;
-  font-size: 11px;
-  border-radius: 0;
-  color: var(--text-dim);
+/* Segmented Edit/Preview control — one pill, sliding highlight. */
+.seg-toggle {
+  float: right;
+  display: inline-flex;
+  padding: 2px;
+  gap: 0;
+  background: #e6e8ec;
+  border-radius: 7px;
 }
-.mode-toggle button:first-child { border-radius: 5px 0 0 5px; }
-.mode-toggle button:last-child { border-radius: 0 5px 5px 0; }
-.mode-toggle button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.seg-toggle button {
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  transition: background 0.12s, color 0.12s;
+}
+.seg-toggle button:hover { background: transparent; color: var(--text); }
+.seg-toggle button.active {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+}
 
 .md-preview {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
-  background: #fcfcfd;
+  background: #fff;
   font-size: 13px;
   overflow-wrap: break-word;
+  cursor: text;
 }
+.md-preview:hover { border-color: #c3c9d0; }
 .md-preview > :first-child { margin-top: 0; }
 .md-preview > :last-child { margin-bottom: 0; }
 .md-preview code {

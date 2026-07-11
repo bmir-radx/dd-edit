@@ -223,9 +223,11 @@ function DescriptionField({
   changed: boolean
   onCommit: (value: string) => void
 }) {
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit')
+  // Preview by default: reading the rendered description is the common case;
+  // click Edit to change it.
+  const [mode, setMode] = useState<'edit' | 'preview'>('preview')
   const html = useMemo(
-    () => (mode === 'preview' ? (marked.parse(value || '*no description*') as string) : ''),
+    () => (mode === 'preview' ? (marked.parse(value || '_No description._') as string) : ''),
     [mode, value],
   )
 
@@ -234,23 +236,36 @@ function DescriptionField({
       <span>
         Description — Markdown{' '}
         {changed ? <span className="mod-dot" title="Modified since open / last save">●</span> : null}
-        <span className="mode-toggle">
-          <button type="button" className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-            edit
+        <span className="seg-toggle" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'edit'}
+            className={mode === 'edit' ? 'active' : ''}
+            onClick={() => setMode('edit')}
+          >
+            Edit
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={mode === 'preview'}
             className={mode === 'preview' ? 'active' : ''}
             onClick={() => setMode('preview')}
           >
-            preview
+            Preview
           </button>
         </span>
       </span>
       {mode === 'edit' ? (
         <CommitTextarea value={value} onCommit={onCommit} rows={5} />
       ) : (
-        <div className="md-preview" dangerouslySetInnerHTML={{ __html: html }} />
+        <div
+          className="md-preview"
+          onClick={() => setMode('edit')}
+          title="Click to edit"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       )}
     </label>
   )
