@@ -686,9 +686,14 @@ export function GridView({
       // (so the pills top-align with sibling cells instead of centering).
       const colWrapped = spec !== undefined && wrappedCols.has(spec.key as string)
       const tallRow = rect.height > MIN_ROW_HEIGHT + 2
-      // Terms always custom-draw (for their teal color); other pill lists only
-      // when wrapped or in a tall row (otherwise GDG's default bubble is fine).
-      const drawBubble = colWrapped || tallRow || spec?.key === 'terms'
+      // Colored pill columns (enumeration, missing values, terms) always
+      // custom-draw so their color shows; plain lists (aliases, examples) only
+      // when wrapped or in a tall row (else GDG's default bubble is fine).
+      const coloredPillCol =
+        spec?.key === 'enumeration' ||
+        spec?.key === 'missing_value_codes' ||
+        spec?.key === 'terms'
+      const drawBubble = colWrapped || tallRow || coloredPillCol
       if (drawBubble && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
         ctx.save()
         ctx.beginPath()
@@ -702,11 +707,19 @@ export function GridView({
         // First pill row centered on the shared first-line center, so it lines
         // up with plain text / pills in sibling cells.
         let y = firstLineCenterY(rect.y, rect.height) - PILL_H / 2
-        // Ontology terms get their own (violet) pill color, from the shared
-        // palette; other lists stay neutral gray.
-        const isTerms = spec?.key === 'terms'
-        const pillBg = isTerms ? '#ede9fe' : '#eef1f4'
-        const pillFg = isTerms ? '#6d28d9' : '#374151'
+        // Per-column pill colors from the shared palette: enumeration & missing
+        // values blue (the "value" identity), ontology terms violet, other
+        // lists neutral gray.
+        const key = spec?.key
+        let pillBg = '#eef1f4'
+        let pillFg = '#374151'
+        if (key === 'enumeration' || key === 'missing_value_codes') {
+          pillBg = '#eef4ff'
+          pillFg = '#1d4ed8'
+        } else if (key === 'terms') {
+          pillBg = '#ede9fe'
+          pillFg = '#6d28d9'
+        }
         for (const item of cell.data) {
           const w = Math.min(ctx.measureText(item).width + PILL_PAD_X * 2, right - left)
           if (x > left && x + w > right) {
