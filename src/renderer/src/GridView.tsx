@@ -456,8 +456,11 @@ export function GridView({
         id: c.key,
         title: c.title,
         width: widths[c.key] ?? c.width,
-        // Wrappable columns get a header chevron -> per-column wrap menu.
+        // Wrappable columns get a header menu (the ⋮ we always draw in
+        // drawHeader). menuIcon points at an empty sprite so the grid's own
+        // hover icon (a triangle that reads as a sort arrow) never appears.
         hasMenu: WRAPPABLE_KEYS.includes(c.key as string),
+        menuIcon: 'none',
       })),
     [widths],
   )
@@ -831,6 +834,7 @@ export function GridView({
       onCellEdited={onCellEdited}
       drawCell={drawCell}
       drawHeader={drawHeader}
+      headerIcons={{ none: () => '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"></svg>' }}
       onRowAppended={onRowAppended}
       onRowMoved={onRowMoved}
       onDelete={onDelete}
