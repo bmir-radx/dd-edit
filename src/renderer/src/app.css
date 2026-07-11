@@ -137,7 +137,7 @@ pre.preview.stale { opacity: 0.5; }
 
 /* ------------------------------------------------------------ inspector */
 
-.inspector { padding: 14px; background: #e4e5e9; }
+.inspector { padding: 14px; background: #dcdee3; }
 .inspector .hint { color: var(--text-dim); padding: 32px 12px; text-align: center; line-height: 1.6; }
 
 /* Sticky element header — always know which element you're editing. */
@@ -146,7 +146,7 @@ pre.preview.stale { opacity: 0.5; }
   top: -14px;                       /* cancels the inspector's top padding */
   margin: -14px -14px 14px;
   padding: 12px 16px;
-  background: #e4e5e9;
+  background: #dcdee3;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -165,8 +165,8 @@ pre.preview.stale { opacity: 0.5; }
 
 /* Each field group is a card: clear separation, room to breathe. */
 .inspector .card {
-  background: #fff;
-  border: 1px solid var(--border);
+  background: #eceef1;
+  border: 1px solid #d6d9de;
   border-radius: 10px;
   padding: 14px 16px 16px;
   margin-bottom: 12px;
