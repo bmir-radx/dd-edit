@@ -63,6 +63,18 @@ const BASE_FONT = `13px ${FONT_FAMILY}`
 const LINE_HEIGHT = 17
 const MIN_ROW_HEIGHT = 34
 const MAX_ROW_HEIGHT = 400
+const CELL_PAD_TOP = 9 // top inset of a cell's first line in a tall/wrapped row
+
+/**
+ * The vertical CENTER (textBaseline 'middle') of a cell's first line — the one
+ * value every custom-drawn cell type (text, markdown, pills) must share so a
+ * row aligns consistently. Single-line rows center in the row; tall rows pin
+ * the first line near the top.
+ */
+function firstLineCenterY(rectY: number, rectHeight: number): number {
+  if (rectHeight > MIN_ROW_HEIGHT + 2) return rectY + CELL_PAD_TOP + LINE_HEIGHT / 2
+  return rectY + rectHeight / 2
+}
 
 let measureCtx: CanvasRenderingContext2D | null = null
 function getMeasureCtx(): CanvasRenderingContext2D {
@@ -653,8 +665,10 @@ export function GridView({
         const width = Math.min(ctx.measureText(text).width + 16, rect.width - 12)
         const height = 20
         const x = rect.x + 6
-        // Top-aligned: pill sits near the top of the (possibly tall) row.
-        const y = rect.y + 7
+        // Center the pill on the shared first-line center, so it lines up with
+        // the plain text in sibling cells.
+        const cy = firstLineCenterY(rect.y, rect.height)
+        const y = cy - height / 2
         ctx.beginPath()
         ctx.roundRect(x, y, width, height, 10)
         ctx.fillStyle = bg
@@ -662,7 +676,7 @@ export function GridView({
         ctx.clip() // keep long text inside the pill
         ctx.fillStyle = fg
         ctx.textBaseline = 'middle'
-        ctx.fillText(text, x + 8, y + height / 2 + 0.5)
+        ctx.fillText(text, x + 8, cy + 0.5)
         ctx.restore()
         return
       }
@@ -681,7 +695,9 @@ export function GridView({
         const left = rect.x + 6
         const right = rect.x + rect.width - 6
         let x = left
-        let y = rect.y + 5
+        // First pill row centered on the shared first-line center, so it lines
+        // up with plain text / pills in sibling cells.
+        let y = firstLineCenterY(rect.y, rect.height) - PILL_H / 2
         for (const item of cell.data) {
           const w = Math.min(ctx.measureText(item).width + PILL_PAD_X * 2, right - left)
           if (x > left && x + w > right) {
@@ -721,7 +737,7 @@ export function GridView({
         ctx.textBaseline = 'middle'
         if (colWrapped) {
           const layout = layoutMd(ctx, raw, rect.width - pad * 2)
-          let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+          let y = firstLineCenterY(rect.y, rect.height)
           const bottom = rect.y + rect.height
           outer: for (let p = 0; p < layout.paragraphs.length; p++) {
             if (p > 0) y += PARA_GAP
@@ -733,13 +749,9 @@ export function GridView({
           }
         } else {
           // Single line: the first laid-out line, ellipsized when more follows.
-          // Top-aligned in tall rows, centered in ordinary single-line rows.
           const layout = layoutMd(ctx, raw, 1e9)
           const segs = layout.paragraphs[0]?.[0] ?? []
-          const yMid =
-            rect.height > MIN_ROW_HEIGHT + 2
-              ? rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
-              : rect.y + rect.height / 2 + 1
+          const yMid = firstLineCenterY(rect.y, rect.height)
           const maxX = rect.width - pad * 2
           let x = 0
           let truncated =
@@ -776,7 +788,7 @@ export function GridView({
         ctx.font = BASE_FONT
         ctx.fillStyle = theme.textDark
         ctx.textBaseline = 'middle'
-        let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+        let y = firstLineCenterY(rect.y, rect.height)
         const bottom = rect.y + rect.height
         // Wrap only if this column opted into wrapping; otherwise one line.
         const paragraphs = colWrapped ? wrapParagraphs(ctx, raw, maxWidth) : [[raw]]
