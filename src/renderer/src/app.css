@@ -176,7 +176,7 @@ pre.preview.stale { opacity: 0.5; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--accent);
+  color: var(--text-dim);
 }
 .inspector label.field { display: block; margin-bottom: 12px; }
 .inspector label.field:last-child { margin-bottom: 0; }
