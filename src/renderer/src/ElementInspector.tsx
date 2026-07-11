@@ -16,7 +16,14 @@ marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea, CommitWrapInput } from './inputs'
+import { pillColors } from './pillColors'
 import type { DataElement, EnumItem } from './types/document'
+
+/** Pill colors for the value badge over a datatype/cardinality select. */
+function pillStyle(key: 'datatype' | 'cardinality', value: string) {
+  const { bg, fg } = pillColors(key, value)
+  return { background: bg, color: fg } as const
+}
 
 type NullableTextKey =
   | 'description' | 'section' | 'unit' | 'pattern' | 'precondition'
@@ -99,32 +106,42 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         <div className="row2">
           <label className="field">
             <span>Datatype <Dot k="datatype" /></span>
-            <select
-              value={element.datatype}
-              onChange={(e) => apply((d) => setField(d, index, 'datatype', e.target.value))}
-            >
-              {/* keep an out-of-vocabulary value visible instead of silently swapping it */}
-              {!datatypes.includes(element.datatype) && (
-                <option value={element.datatype}>{element.datatype || '(none)'}</option>
-              )}
-              {datatypes.map((dt) => (
-                <option key={dt} value={dt}>{dt}</option>
-              ))}
-            </select>
+            <div className="pill-field">
+              <select
+                value={element.datatype}
+                onChange={(e) => apply((d) => setField(d, index, 'datatype', e.target.value))}
+              >
+                {/* keep an out-of-vocabulary value visible instead of silently swapping it */}
+                {!datatypes.includes(element.datatype) && (
+                  <option value={element.datatype}>{element.datatype || '(none)'}</option>
+                )}
+                {datatypes.map((dt) => (
+                  <option key={dt} value={dt}>{dt}</option>
+                ))}
+              </select>
+              <span className="value-pill" style={pillStyle('datatype', element.datatype)}>
+                {element.datatype || '(none)'}
+              </span>
+            </div>
           </label>
           <label className="field">
             <span>Cardinality <Dot k="cardinality" /></span>
-            <select
-              value={element.cardinality}
-              onChange={(e) =>
-                apply((d) =>
-                  setField(d, index, 'cardinality', e.target.value as DataElement['cardinality']),
-                )
-              }
-            >
-              <option value="single">single</option>
-              <option value="multiple">multiple</option>
-            </select>
+            <div className="pill-field">
+              <select
+                value={element.cardinality}
+                onChange={(e) =>
+                  apply((d) =>
+                    setField(d, index, 'cardinality', e.target.value as DataElement['cardinality']),
+                  )
+                }
+              >
+                <option value="single">single</option>
+                <option value="multiple">multiple</option>
+              </select>
+              <span className="value-pill" style={pillStyle('cardinality', element.cardinality)}>
+                {element.cardinality}
+              </span>
+            </div>
           </label>
         </div>
         <label className="check">

@@ -30,6 +30,7 @@ import '@glideapps/glide-data-grid/dist/index.css'
 import { useCallback, useMemo, useState, type Ref } from 'react'
 import { deleteElements, emptyElement, insertElement, moveElement, setField } from './model/document'
 import { useEditor } from './model/store'
+import { pillColors } from './pillColors'
 import { findingRow, type Finding, type FindingLevel } from './sidecar'
 import type { DataElement, EnumItem } from './types/document'
 
@@ -279,22 +280,6 @@ const MODIFIED_BLUE = '#2563eb'
 
 function worse(a: FindingLevel | undefined, b: FindingLevel): FindingLevel {
   return a === 'ERROR' || b === 'ERROR' ? 'ERROR' : a === 'WARNING' || b === 'WARNING' ? 'WARNING' : b
-}
-
-/** Datatype families get a hue so a column of types is scannable at a glance. */
-function datatypePill(datatype: string): { bg: string; fg: string } {
-  const s = datatype.toLowerCase()
-  if (/(int|float|decimal|double|number)/.test(s)) return { bg: '#dbeafe', fg: '#1d4ed8' } // numeric
-  if (/(date|time|year)/.test(s)) return { bg: '#ede9fe', fg: '#6d28d9' } // temporal
-  if (/bool/.test(s)) return { bg: '#d1fae5', fg: '#047857' } // boolean
-  if (/(url|iri|uri|email|phone|zip|sha|mime)/.test(s)) return { bg: '#cffafe', fg: '#0e7490' } // coded
-  return { bg: '#f1f5f9', fg: '#475569' } // text / other
-}
-
-/** Pill colors for the categorical columns (both stay editable). */
-function pillColors(key: 'cardinality' | 'datatype', text: string) {
-  if (key === 'datatype') return datatypePill(text)
-  return text === 'multiple' ? { bg: '#ede9fe', fg: '#6d28d9' } : { bg: '#f1f5f9', fg: '#475569' }
 }
 
 /**
@@ -668,7 +653,8 @@ export function GridView({
         const width = Math.min(ctx.measureText(text).width + 16, rect.width - 12)
         const height = 20
         const x = rect.x + 6
-        const y = rect.y + (rect.height - height) / 2
+        // Top-aligned: pill sits near the top of the (possibly tall) row.
+        const y = rect.y + 7
         ctx.beginPath()
         ctx.roundRect(x, y, width, height, 10)
         ctx.fillStyle = bg

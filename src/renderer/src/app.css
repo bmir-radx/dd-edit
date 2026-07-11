@@ -225,6 +225,30 @@ pre.preview.stale { opacity: 0.5; }
   word-break: break-word;
 }
 .inspector input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+/* A select whose CURRENT VALUE reads as a colored pill, while the control
+   itself stays a normal-sized field. An inline pill sits over the select's
+   value area; the native select (transparent text) still handles the dropdown
+   and click. */
+.pill-field { position: relative; }
+.pill-field select {
+  color: transparent;               /* hide native value text; the pill shows it */
+}
+.pill-field select option { color: var(--text); }  /* dropdown list stays readable */
+.pill-field .value-pill {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;             /* clicks fall through to the select */
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  max-width: calc(100% - 34px);     /* leave room for the chevron */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .inspector .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .inspector .check {
   display: flex;
