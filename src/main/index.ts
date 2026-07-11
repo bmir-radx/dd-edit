@@ -157,15 +157,36 @@ function buildMenu(): void {
 
 // -------------------------------------------------------------- lifecycle
 
+// The renderer reports document dirtiness so close can be guarded here —
+// otherwise closing the window silently discards unsaved work.
+let isDirty = false
+ipcMain.on('dirty-changed', (_event, dirty: boolean) => {
+  isDirty = dirty
+})
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
+    // Native-feeling chrome on macOS: traffic lights over the app toolbar.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+  win.on('close', (event) => {
+    if (!isDirty) return
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Close Without Saving', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'You have unsaved changes.',
+      detail: 'Your changes will be lost if you close without saving.',
+    })
+    if (choice === 1) event.preventDefault()
   })
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL) // dev server (HMR)

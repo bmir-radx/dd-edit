@@ -34,6 +34,9 @@ body {
 }
 .toolbar > * { -webkit-app-region: no-drag; }  /* ...except its controls */
 
+/* Room for the macOS traffic lights over the hiddenInset title bar. */
+.app.mac .toolbar { padding-left: 84px; }
+
 .toolbar .file-name { font-weight: 600; font-size: 14px; margin-right: 4px; }
 .toolbar .dirty-dot { color: var(--accent); font-weight: 700; }
 .toolbar .spacer { flex: 1; }
@@ -163,6 +166,48 @@ pre.preview.stale { opacity: 0.5; }
 }
 .enum-item .remove:hover { color: var(--danger); background: transparent; border: none; }
 .add-item { margin-top: 2px; font-size: 12px; padding: 3px 9px; }
+
+/* ------------------------------------------------------------ problems */
+
+.problems { display: flex; flex-direction: column; }
+.problems .all-clear { padding: 24px 12px; text-align: center; color: #2e7d32; }
+
+.problem {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 8px 10px;
+  background: #fff;
+}
+.problem:hover { background: var(--accent-soft); border-color: var(--border); }
+.problem:disabled { opacity: 1; cursor: default; }
+.problem .badge svg { margin-right: 0; }
+.problem.error .badge { color: var(--danger); }
+.problem.warning .badge { color: #b7791f; }
+.problem .text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.problem .msg { white-space: normal; }
+.problem .where { font-size: 11px; color: var(--text-dim); }
+
+.problem-summary { display: flex; gap: 8px; align-items: center; }
+.problem-summary .err { color: var(--danger); }
+.problem-summary .warn { color: #b7791f; }
+
+.statusbar .stat-err { color: var(--danger); }
+.statusbar .stat-warn { color: #b7791f; }
+
+.section-jump {
+  font: inherit;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-dim);
+  max-width: 190px;
+}
 
 /* ------------------------------------------------------------- footer */
 

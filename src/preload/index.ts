@@ -2,6 +2,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('ddEdit', {
+  platform: process.platform,
+  setDirty: (dirty: boolean) => ipcRenderer.send('dirty-changed', dirty),
   getSidecarInfo: () => ipcRenderer.invoke('sidecar-info'),
   openFile: () => ipcRenderer.invoke('dialog:open'),
   openRedcapFile: () => ipcRenderer.invoke('dialog:open-redcap'),

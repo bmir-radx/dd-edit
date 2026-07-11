@@ -31,6 +31,24 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return parsed as T
 }
 
+export type FindingLevel = 'ERROR' | 'WARNING' | 'INFO'
+
+export interface Finding {
+  level: FindingLevel
+  check: string
+  message: string
+  /** 1-based line in the CSV serialization; data row i is line i + 2. */
+  line: number | null
+  /** CSV column header name (e.g. "Datatype"), when the finding is cell-scoped. */
+  column: string | null
+  value: string | null
+}
+
+/** Grid row index for a finding, or null for file-level findings. */
+export function findingRow(f: Finding): number | null {
+  return f.line !== null && f.line >= 2 ? f.line - 2 : null
+}
+
 export const sidecar = {
   health: () => request<{ status: string; versions: Record<string, string> }>('/health'),
 
@@ -39,6 +57,11 @@ export const sidecar = {
 
   convert: (content: string, to: 'csv' | 'linkml' | 'json', compact = false) =>
     request<{ content: string; detected: string }>('/convert', { content, to, compact }),
+
+  validate: (content: string) => request<{ findings: Finding[] }>('/validate', { content }),
+
+  render: (content: string, title?: string) =>
+    request<{ html: string }>('/render', { content, title }),
 
   importRedcap: (content: string, provenance = '') =>
     request<{ content: string; elements: number }>('/import/redcap', { content, provenance }),

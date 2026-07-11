@@ -11,6 +11,7 @@ import {
   CompactSelection,
   DataEditor,
   GridCellKind,
+  type DataEditorRef,
   type EditableGridCell,
   type GridCell,
   type GridColumn,
@@ -18,10 +19,48 @@ import {
   type Item,
 } from '@glideapps/glide-data-grid'
 import '@glideapps/glide-data-grid/dist/index.css'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type Ref } from 'react'
 import { deleteElements, emptyElement, insertElement, moveElement, setField } from './model/document'
 import { useEditor } from './model/store'
+import { findingRow, type Finding, type FindingLevel } from './sidecar'
 import type { DataElement, EnumItem } from './types/document'
+
+/** The validator reports CSV column headers; map them to element fields. */
+const HEADER_TO_KEY: Record<string, keyof DataElement> = {
+  Id: 'id',
+  Aliases: 'aliases',
+  Label: 'label',
+  Description: 'description',
+  Section: 'section',
+  Cardinality: 'cardinality',
+  Terms: 'terms',
+  Datatype: 'datatype',
+  Pattern: 'pattern',
+  Unit: 'unit',
+  Enumeration: 'enumeration',
+  MissingValueCodes: 'missing_value_codes',
+  Precondition: 'precondition',
+  Required: 'required',
+  Examples: 'examples',
+  Notes: 'notes',
+  Provenance: 'provenance',
+  SeeAlso: 'see_also',
+}
+
+const ROW_TINT: Record<FindingLevel, string | undefined> = {
+  ERROR: '#fdf1f1',
+  WARNING: '#fdf8ec',
+  INFO: undefined,
+}
+const CELL_TINT: Record<FindingLevel, string | undefined> = {
+  ERROR: '#f9dcdc',
+  WARNING: '#faeeca',
+  INFO: undefined,
+}
+
+function worse(a: FindingLevel | undefined, b: FindingLevel): FindingLevel {
+  return a === 'ERROR' || b === 'ERROR' ? 'ERROR' : a === 'WARNING' || b === 'WARNING' ? 'WARNING' : b
+}
 
 type ScalarKey =
   | 'id'
@@ -83,9 +122,12 @@ export interface GridViewProps {
   onCursorRow: (row: number | null) => void
   showSearch: boolean
   onSearchClose: () => void
+  findings: Finding[]
+  /** For imperative scrolling (problems panel, section jumper). */
+  gridRef?: Ref<DataEditorRef>
 }
 
-export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewProps) {
+export function GridView({ onCursorRow, showSearch, onSearchClose, findings, gridRef }: GridViewProps) {
   const doc = useEditor((s) => s.doc)
   const apply = useEditor((s) => s.apply)
 
@@ -94,6 +136,20 @@ export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewPro
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   })
+
+  // Row -> worst level, and "row|field" -> worst level, for the tints.
+  const { rowLevels, cellLevels } = useMemo(() => {
+    const rows = new Map<number, FindingLevel>()
+    const cells = new Map<string, FindingLevel>()
+    for (const f of findings) {
+      const row = findingRow(f)
+      if (row === null) continue
+      rows.set(row, worse(rows.get(row), f.level))
+      const key = f.column ? HEADER_TO_KEY[f.column] : undefined
+      if (key) cells.set(`${row}|${key}`, worse(cells.get(`${row}|${key}`), f.level))
+    }
+    return { rowLevels: rows, cellLevels: cells }
+  }, [findings])
 
   const columns = useMemo<GridColumn[]>(
     () => COLUMNS.map((c) => ({ id: c.key, title: c.title, width: widths[c.key] ?? c.width })),
@@ -107,8 +163,15 @@ export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewPro
       if (!spec || !element) {
         return { kind: GridCellKind.Text, data: '', displayData: '', allowOverlay: false }
       }
+      const level = cellLevels.get(`${row}|${spec.key}`)
+      const tint = level ? CELL_TINT[level] : undefined
       if (spec.kind === 'boolean') {
-        return { kind: GridCellKind.Boolean, data: Boolean(element[spec.key]), allowOverlay: false }
+        return {
+          kind: GridCellKind.Boolean,
+          data: Boolean(element[spec.key]),
+          allowOverlay: false,
+          ...(tint ? { themeOverride: { bgCell: tint } } : {}),
+        }
       }
       if (spec.kind === 'summary') {
         const text = summarize(spec.key, element)
@@ -118,14 +181,20 @@ export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewPro
           displayData: text,
           allowOverlay: true,
           readonly: true,
-          themeOverride: { textDark: '#888888' },
+          themeOverride: { textDark: '#888888', ...(tint ? { bgCell: tint } : {}) },
         }
       }
       const raw = element[spec.key as ScalarKey]
       const text = raw == null ? '' : String(raw)
-      return { kind: GridCellKind.Text, data: text, displayData: text, allowOverlay: true }
+      return {
+        kind: GridCellKind.Text,
+        data: text,
+        displayData: text,
+        allowOverlay: true,
+        ...(tint ? { themeOverride: { bgCell: tint } } : {}),
+      }
     },
-    [doc],
+    [doc, cellLevels],
   )
 
   const onCellEdited = useCallback(
@@ -188,6 +257,7 @@ export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewPro
 
   return (
     <DataEditor
+      ref={gridRef}
       columns={columns}
       rows={doc.elements.length}
       getCellContent={getCellContent}
@@ -218,7 +288,12 @@ export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewPro
         textHeader: '#1f2328',
         borderColor: '#e9ecef',
       }}
-      getRowThemeOverride={(row) => (row % 2 === 1 ? { bgCell: '#fafbfc' } : undefined)}
+      getRowThemeOverride={(row) => {
+        const level = rowLevels.get(row)
+        const tint = level ? ROW_TINT[level] : undefined
+        if (tint) return { bgCell: tint }
+        return row % 2 === 1 ? { bgCell: '#fafbfc' } : undefined
+      }}
     />
   )
 }

@@ -8,7 +8,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor } from './model/store'
 import { sidecar } from './sidecar'
 
-export function PreviewPane({ format, enabled }: { format: 'csv' | 'linkml'; enabled: boolean }) {
+export function PreviewPane({
+  format,
+  enabled,
+  title,
+}: {
+  format: 'csv' | 'linkml' | 'html'
+  enabled: boolean
+  title?: string
+}) {
   const doc = useEditor((s) => s.doc)
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -19,9 +27,13 @@ export function PreviewPane({ format, enabled }: { format: 'csv' | 'linkml'; ena
     const mine = ++generation.current
     const timer = setTimeout(async () => {
       try {
-        const res = await sidecar.convert(JSON.stringify(doc), format)
+        const payload = JSON.stringify(doc)
+        const content =
+          format === 'html'
+            ? (await sidecar.render(payload, title)).html
+            : (await sidecar.convert(payload, format)).content
         if (generation.current !== mine) return // a newer edit superseded us
-        setText(res.content)
+        setText(content)
         setError(null)
       } catch (e) {
         if (generation.current !== mine) return
@@ -29,14 +41,23 @@ export function PreviewPane({ format, enabled }: { format: 'csv' | 'linkml'; ena
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [doc, format, enabled])
+  }, [doc, format, enabled, title])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {error ? <div className="error-banner">{error}</div> : null}
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <pre className={`preview${error ? ' stale' : ''}`}>{text}</pre>
-      </div>
+      {format === 'html' ? (
+        <iframe
+          sandbox=""
+          srcDoc={text}
+          title="Rendered dictionary"
+          style={{ flex: 1, border: 'none', opacity: error ? 0.5 : 1, background: '#fff' }}
+        />
+      ) : (
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          <pre className={`preview${error ? ' stale' : ''}`}>{text}</pre>
+        </div>
+      )}
     </div>
   )
 }
