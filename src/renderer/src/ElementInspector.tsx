@@ -72,121 +72,139 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
 
   return (
     <div className="inspector">
-      {isNew ? <span className="chip new">new element</span> : null}
-      {!isNew && !untouched ? <span className="chip modified">modified</span> : null}
-
-      <h3>Identity</h3>
-      <label className="field">
-        <span>Id (variable name) <Dot k="id" /></span>
-        <CommitInput value={element.id} onCommit={commitText('id')} />
-      </label>
-      <label className="field">
-        <span>Label <Dot k="label" /></span>
-        <CommitInput value={element.label} onCommit={commitText('label')} />
-      </label>
-      <label className="field">
-        <span>Section <Dot k="section" /></span>
-        <CommitInput value={text('section')} onCommit={commitNullable('section')} />
-      </label>
-
-      <h3>Type</h3>
-      <div className="row2">
-        <label className="field">
-          <span>Datatype <Dot k="datatype" /></span>
-          <select
-            value={element.datatype}
-            onChange={(e) => apply((d) => setField(d, index, 'datatype', e.target.value))}
-          >
-            {/* keep an out-of-vocabulary value visible instead of silently swapping it */}
-            {!datatypes.includes(element.datatype) && (
-              <option value={element.datatype}>{element.datatype || '(none)'}</option>
-            )}
-            {datatypes.map((dt) => (
-              <option key={dt} value={dt}>{dt}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Cardinality <Dot k="cardinality" /></span>
-          <select
-            value={element.cardinality}
-            onChange={(e) =>
-              apply((d) =>
-                setField(d, index, 'cardinality', e.target.value as DataElement['cardinality']),
-              )
-            }
-          >
-            <option value="single">single</option>
-            <option value="multiple">multiple</option>
-          </select>
-        </label>
+      <div className="inspector-head">
+        <span className="el-id">{element.id || '(no id)'}</span>
+        {isNew ? <span className="chip new">new</span> : null}
+        {!isNew && !untouched ? <span className="chip modified">modified</span> : null}
       </div>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={element.required}
-          onChange={(e) => apply((d) => setField(d, index, 'required', e.target.checked))}
+
+      <section className="card">
+        <h3>Identity</h3>
+        <label className="field">
+          <span>Id (variable name) <Dot k="id" /></span>
+          <CommitInput value={element.id} onCommit={commitText('id')} />
+        </label>
+        <label className="field">
+          <span>Label <Dot k="label" /></span>
+          <CommitInput value={element.label} onCommit={commitText('label')} />
+        </label>
+        <label className="field">
+          <span>Section <Dot k="section" /></span>
+          <CommitInput value={text('section')} onCommit={commitNullable('section')} />
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Type</h3>
+        <div className="row2">
+          <label className="field">
+            <span>Datatype <Dot k="datatype" /></span>
+            <select
+              value={element.datatype}
+              onChange={(e) => apply((d) => setField(d, index, 'datatype', e.target.value))}
+            >
+              {/* keep an out-of-vocabulary value visible instead of silently swapping it */}
+              {!datatypes.includes(element.datatype) && (
+                <option value={element.datatype}>{element.datatype || '(none)'}</option>
+              )}
+              {datatypes.map((dt) => (
+                <option key={dt} value={dt}>{dt}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Cardinality <Dot k="cardinality" /></span>
+            <select
+              value={element.cardinality}
+              onChange={(e) =>
+                apply((d) =>
+                  setField(d, index, 'cardinality', e.target.value as DataElement['cardinality']),
+                )
+              }
+            >
+              <option value="single">single</option>
+              <option value="multiple">multiple</option>
+            </select>
+          </label>
+        </div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={element.required}
+            onChange={(e) => apply((d) => setField(d, index, 'required', e.target.checked))}
+          />
+          Required <Dot k="required" />
+        </label>
+        <label className="field">
+          <span>Unit <Dot k="unit" /></span>
+          <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
+        </label>
+        <label className="field">
+          <span>Pattern (regex) <Dot k="pattern" /></span>
+          <CommitInput className="mono" value={text('pattern')} onCommit={commitNullable('pattern')} />
+        </label>
+        <label className="field">
+          <span>Precondition <Dot k="precondition" /></span>
+          <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Enumeration <Dot k="enumeration" /></h3>
+        <EnumItemsEditor
+          items={items('enumeration')}
+          onChange={(n) => commitItems('enumeration', n)}
         />
-        Required <Dot k="required" />
-      </label>
-      <label className="field">
-        <span>Unit <Dot k="unit" /></span>
-        <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
-      </label>
-      <label className="field">
-        <span>Pattern (regex) <Dot k="pattern" /></span>
-        <CommitInput className="mono" value={text('pattern')} onCommit={commitNullable('pattern')} />
-      </label>
-      <label className="field">
-        <span>Precondition <Dot k="precondition" /></span>
-        <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />
-      </label>
+      </section>
 
-      <h3>Enumeration <Dot k="enumeration" /></h3>
-      <EnumItemsEditor items={items('enumeration')} onChange={(n) => commitItems('enumeration', n)} />
+      <section className="card">
+        <h3>Missing-value codes <Dot k="missing_value_codes" /></h3>
+        <EnumItemsEditor
+          items={items('missing_value_codes')}
+          onChange={(n) => commitItems('missing_value_codes', n)}
+        />
+      </section>
 
-      <h3>Missing-value codes <Dot k="missing_value_codes" /></h3>
-      <EnumItemsEditor
-        items={items('missing_value_codes')}
-        onChange={(n) => commitItems('missing_value_codes', n)}
-      />
+      <section className="card">
+        <h3>Documentation</h3>
+        <DescriptionField
+          value={text('description')}
+          changed={changed('description')}
+          onCommit={commitNullable('description')}
+        />
+        <label className="field">
+          <span>Notes <Dot k="notes" /></span>
+          <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={2} />
+        </label>
+        <div className="row2">
+          <label className="field">
+            <span>Provenance <Dot k="provenance" /></span>
+            <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
+          </label>
+          <label className="field">
+            <span>See also (URL) <Dot k="see_also" /></span>
+            <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
+          </label>
+        </div>
+      </section>
 
-      <h3>Documentation</h3>
-      <DescriptionField
-        value={text('description')}
-        changed={changed('description')}
-        onCommit={commitNullable('description')}
-      />
-      <label className="field">
-        <span>Notes <Dot k="notes" /></span>
-        <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={2} />
-      </label>
-      <div className="row2">
+      <section className="card">
+        <h3>Lists</h3>
         <label className="field">
-          <span>Provenance <Dot k="provenance" /></span>
-          <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
+          <span>Ontology terms — one per line <Dot k="terms" /></span>
+          <CommitTextarea value={listText('terms')} onCommit={commitList('terms')} rows={2} />
         </label>
-        <label className="field">
-          <span>See also (URL) <Dot k="see_also" /></span>
-          <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
-        </label>
-      </div>
-
-      <h3>Lists</h3>
-      <label className="field">
-        <span>Ontology terms — one per line <Dot k="terms" /></span>
-        <CommitTextarea value={listText('terms')} onCommit={commitList('terms')} rows={2} />
-      </label>
-      <div className="row2">
-        <label className="field">
-          <span>Aliases — one per line <Dot k="aliases" /></span>
-          <CommitTextarea value={listText('aliases')} onCommit={commitList('aliases')} rows={2} />
-        </label>
-        <label className="field">
-          <span>Examples — one per line <Dot k="examples" /></span>
-          <CommitTextarea value={listText('examples')} onCommit={commitList('examples')} rows={2} />
-        </label>
-      </div>
+        <div className="row2">
+          <label className="field">
+            <span>Aliases — one per line <Dot k="aliases" /></span>
+            <CommitTextarea value={listText('aliases')} onCommit={commitList('aliases')} rows={2} />
+          </label>
+          <label className="field">
+            <span>Examples — one per line <Dot k="examples" /></span>
+            <CommitTextarea value={listText('examples')} onCommit={commitList('examples')} rows={2} />
+          </label>
+        </div>
+      </section>
     </div>
   )
 }

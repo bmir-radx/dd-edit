@@ -1,33 +1,49 @@
 /**
- * Live serialization preview (CSV or LinkML YAML): debounced conversion of the
- * document via /convert. On conversion failure (documents are transiently
+ * Live serialization preview (CSV, LinkML YAML, or rendered HTML): debounced
+ * conversion via the sidecar. On conversion failure (documents are transiently
  * invalid mid-edit) the last-good output stays visible under an error banner.
  * Conversion pauses while the pane is hidden (enabled=false).
+ *
+ * When rows are selected in the grid, the preview scopes to just those
+ * elements (a sub-document), with a banner noting the scope.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor } from './model/store'
 import { sidecar } from './sidecar'
+import type { DdDocument } from './types/document'
 
 export function PreviewPane({
   format,
   enabled,
   title,
+  selectedRows,
 }: {
   format: 'csv' | 'linkml' | 'html'
   enabled: boolean
   title?: string
+  selectedRows: number[]
 }) {
   const doc = useEditor((s) => s.doc)
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const generation = useRef(0)
 
+  // Scope to the selection when there is one (2+ rows, or a single row is
+  // still a useful focus); otherwise the whole document.
+  const scoped: DdDocument = useMemo(() => {
+    if (selectedRows.length === 0) return doc
+    const elements = selectedRows.map((r) => doc.elements[r]).filter(Boolean)
+    return { ...doc, elements }
+  }, [doc, selectedRows])
+
+  const scoping = selectedRows.length > 0
+
   useEffect(() => {
     if (!enabled) return
     const mine = ++generation.current
     const timer = setTimeout(async () => {
       try {
-        const payload = JSON.stringify(doc)
+        const payload = JSON.stringify(scoped)
         const content =
           format === 'html'
             ? (await sidecar.render(payload, title)).html
@@ -41,10 +57,17 @@ export function PreviewPane({
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [doc, format, enabled, title])
+  }, [scoped, format, enabled, title])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {scoping ? (
+        <div className="scope-banner">
+          Showing {selectedRows.length} selected {selectedRows.length === 1 ? 'element' : 'elements'}
+          {' · '}
+          <span className="hint">clear the selection for the whole dictionary</span>
+        </div>
+      ) : null}
       {error ? <div className="error-banner">{error}</div> : null}
       {format === 'html' ? (
         <iframe

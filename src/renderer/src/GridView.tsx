@@ -403,6 +403,8 @@ function bubbleRows(ctx: CanvasRenderingContext2D, items: string[], maxWidth: nu
 export interface GridViewProps {
   /** Reports the row under the cursor (or null) so the inspector can follow. */
   onCursorRow: (row: number | null) => void
+  /** Reports selected row indices (ascending) so previews can scope to them. */
+  onSelectedRows: (rows: number[]) => void
   showSearch: boolean
   onSearchClose: () => void
   findings: Finding[]
@@ -416,6 +418,7 @@ export interface GridViewProps {
 
 export function GridView({
   onCursorRow,
+  onSelectedRows,
   showSearch,
   onSearchClose,
   findings,
@@ -623,8 +626,16 @@ export function GridView({
     (sel: GridSelection) => {
       setSelection(sel)
       onCursorRow(sel.current ? sel.current.cell[1] : (sel.rows.toArray()[0] ?? null))
+      // Row selection (row markers / row-header clicks) scopes the previews;
+      // a range selection contributes the rows it spans.
+      const rows = new Set<number>(sel.rows.toArray())
+      if (sel.current?.range) {
+        const { y, height } = sel.current.range
+        for (let r = y; r < y + height; r++) rows.add(r)
+      }
+      onSelectedRows([...rows].sort((a, b) => a - b))
     },
-    [onCursorRow],
+    [onCursorRow, onSelectedRows],
   )
 
   const onColumnResize = useCallback((column: GridColumn, newSize: number) => {

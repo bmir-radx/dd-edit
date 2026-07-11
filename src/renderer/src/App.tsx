@@ -41,6 +41,7 @@ export function App() {
   const [datatypes, setDatatypes] = useState<string[]>([])
   const [panelTab, setPanelTab] = useState<PanelTab | null>('element')
   const [cursorRow, setCursorRow] = useState<number | null>(null)
+  const [selectedRows, setSelectedRows] = useState<number[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [findings, setFindings] = useState<Finding[]>([])
   // Per-column wrap (persisted): toggled per column via the header chevron
@@ -350,6 +351,7 @@ export function App() {
             <div className="grid-host">
               <GridView
                 onCursorRow={setCursorRow}
+                onSelectedRows={setSelectedRows}
                 showSearch={showSearch}
                 onSearchClose={() => setShowSearch(false)}
                 findings={findings}
@@ -381,7 +383,12 @@ export function App() {
                   ) : panelTab === 'problems' ? (
                     <ProblemsPanel findings={findings} onJump={jumpToRow} />
                   ) : (
-                    <PreviewPane format={panelTab} enabled={true} title={baseName(filePath)} />
+                    <PreviewPane
+                      format={panelTab}
+                      enabled={true}
+                      title={baseName(filePath)}
+                      selectedRows={selectedRows}
+                    />
                   )}
                 </div>
               </aside>
