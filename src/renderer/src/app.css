@@ -130,8 +130,9 @@ button.primary:hover { filter: brightness(1.08); }
 pre.preview {
   margin: 0;
   padding: 10px;
-  font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: Menlo, ui-monospace, SFMono-Regular, monospace;
   white-space: pre;
 }
 pre.preview.stale { opacity: 0.5; }
