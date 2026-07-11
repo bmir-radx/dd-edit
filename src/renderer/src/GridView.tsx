@@ -878,10 +878,10 @@ export function GridView({
         borderColor: '#e9ecef',
       }}
       getRowThemeOverride={(row) => {
+        // No zebra striping; only validation tints color a row.
         const level = rowLevels.get(row)
         const tint = level ? ROW_TINT[level] : undefined
-        if (tint) return { bgCell: tint }
-        return row % 2 === 1 ? { bgCell: '#fafbfc' } : undefined
+        return tint ? { bgCell: tint } : undefined
       }}
     />
   )
