@@ -19,6 +19,7 @@ import {
   GridCellKind,
   type DataEditorRef,
   type DrawCellCallback,
+  type DrawHeaderCallback,
   type EditableGridCell,
   type GridCell,
   type GridColumn,
@@ -124,25 +125,144 @@ function wrappedTextHeight(
 }
 
 /**
- * Canvas cells can't render HTML, so descriptions display as markdown with
- * the syntax stripped (bold/italic/code markers, link targets, headings) —
- * clean prose in the cell; the overlay still shows fully rendered markdown.
+ * Canvas cells can't render HTML, but they CAN render styled text — so
+ * descriptions get a mini markdown renderer: inline markdown parses into
+ * styled runs (bold / italic / code / links), which lay out word-by-word with
+ * per-run fonts. Code spans draw a chip background; links draw in accent
+ * blue. Layouts are cached per (width, text).
  */
-const stripCache = new Map<string, string>()
-function stripMarkdown(md: string): string {
-  const hit = stripCache.get(md)
+interface MdRun {
+  text: string
+  bold: boolean
+  italic: boolean
+  code: boolean
+  link: boolean
+}
+
+const MONO_FONT = '12px ui-monospace, SFMono-Regular, Menlo, monospace'
+function fontFor(run: MdRun): string {
+  if (run.code) return MONO_FONT
+  return `${run.italic ? 'italic ' : ''}${run.bold ? '600 ' : ''}13px ${FONT_FAMILY}`
+}
+
+const MD_INLINE =
+  /(`[^`]+`)|(\*\*(.+?)\*\*)|(__(.+?)__)|(\*([^*\n]+?)\*)|(_([^_\n]+?)_)|(!?\[([^\]]*)\]\([^)]*\))/
+
+/** Flat inline parse (no nesting) — plenty for data-element descriptions. */
+function parseInlineMd(text: string, baseBold: boolean): MdRun[] {
+  const runs: MdRun[] = []
+  const plain = (t: string) =>
+    t !== '' && runs.push({ text: t, bold: baseBold, italic: false, code: false, link: false })
+  let rest = text
+  while (rest !== '') {
+    const m = MD_INLINE.exec(rest)
+    if (!m) {
+      plain(rest)
+      break
+    }
+    plain(rest.slice(0, m.index))
+    if (m[1] !== undefined) {
+      runs.push({ text: m[1].slice(1, -1), bold: false, italic: false, code: true, link: false })
+    } else if (m[3] !== undefined || m[5] !== undefined) {
+      runs.push({ text: m[3] ?? m[5]!, bold: true, italic: false, code: false, link: false })
+    } else if (m[7] !== undefined || m[9] !== undefined) {
+      runs.push({ text: m[7] ?? m[9]!, bold: baseBold, italic: true, code: false, link: false })
+    } else {
+      runs.push({ text: m[11] ?? '', bold: baseBold, italic: false, code: false, link: true })
+    }
+    rest = rest.slice(m.index + m[0].length)
+  }
+  return runs
+}
+
+/** Paragraphs of runs. Headings render bold; blockquote markers drop. */
+function parseMd(md: string): MdRun[][] {
+  const paragraphs: MdRun[][] = []
+  for (let para of md.split(/\n+/)) {
+    para = para.replace(/^>\s?/, '')
+    const heading = /^#{1,6}\s+/.test(para)
+    if (heading) para = para.replace(/^#{1,6}\s+/, '')
+    if (para.trim() === '') continue
+    paragraphs.push(parseInlineMd(para, heading))
+  }
+  return paragraphs
+}
+
+interface MdSeg {
+  text: string
+  run: MdRun
+  x: number
+  width: number
+}
+interface MdLayout {
+  paragraphs: MdSeg[][][] // paragraph -> line -> segments
+  height: number
+}
+
+const CODE_PAD = 4 // horizontal padding inside a code chip
+
+const mdLayoutCache = new Map<string, MdLayout>()
+function layoutMd(ctx: CanvasRenderingContext2D, md: string, maxWidth: number): MdLayout {
+  const key = `${Math.round(maxWidth)}|${md}`
+  const hit = mdLayoutCache.get(key)
   if (hit !== undefined) return hit
-  if (stripCache.size > 5000) stripCache.clear()
-  const out = md
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/(\*\*|__)([\s\S]*?)\1/g, '$2')
-    .replace(/(^|\W)[*_]([^*_\n][^*_]*?)[*_](?=\W|$)/g, '$1$2')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^>\s?/gm, '')
-  stripCache.set(md, out)
-  return out
+  if (mdLayoutCache.size > 2000) mdLayoutCache.clear()
+
+  const paragraphs: MdSeg[][][] = []
+  let totalLines = 0
+  for (const runs of parseMd(md)) {
+    const lines: MdSeg[][] = []
+    let line: MdSeg[] = []
+    let x = 0
+    for (const run of runs) {
+      ctx.font = fontFor(run)
+      const spaceWidth = ctx.measureText(' ').width
+      for (const word of run.text.split(/\s+/)) {
+        if (word === '') continue
+        const width = ctx.measureText(word).width + (run.code ? CODE_PAD * 2 : 0)
+        const gap = x === 0 ? 0 : spaceWidth
+        if (x > 0 && x + gap + width > maxWidth) {
+          lines.push(line)
+          line = []
+          x = 0
+        }
+        const startX = x === 0 ? 0 : x + gap
+        const last = line[line.length - 1]
+        if (last !== undefined && last.run === run && !run.code) {
+          last.text += ` ${word}`
+          last.width = startX + width - last.x
+        } else {
+          line.push({ text: word, run, x: startX, width })
+        }
+        x = startX + width
+      }
+    }
+    if (line.length > 0) lines.push(line)
+    if (lines.length === 0) continue
+    paragraphs.push(lines)
+    totalLines += lines.length
+  }
+  const layout: MdLayout = {
+    paragraphs,
+    height: totalLines * LINE_HEIGHT + Math.max(0, paragraphs.length - 1) * PARA_GAP,
+  }
+  mdLayoutCache.set(key, layout)
+  return layout
+}
+
+function drawMdSeg(ctx: CanvasRenderingContext2D, seg: MdSeg, left: number, y: number): void {
+  ctx.font = fontFor(seg.run)
+  if (seg.run.code) {
+    ctx.fillStyle = '#eef1f4'
+    ctx.beginPath()
+    ctx.roundRect(left + seg.x, y - 8, seg.width, 16, 4)
+    ctx.fill()
+    ctx.fillStyle = '#1f2328'
+    ctx.fillText(seg.text, left + seg.x + CODE_PAD, y)
+  } else {
+    ctx.fillStyle = seg.run.link ? '#2563eb' : '#1f2328'
+    ctx.fillText(seg.text, left + seg.x, y)
+  }
 }
 
 const ROW_TINT: Record<FindingLevel, string | undefined> = {
@@ -217,12 +337,13 @@ interface ColumnSpec {
 
 const COLUMNS: ColumnSpec[] = [
   { key: '__mod', title: '', width: 34, kind: 'modified' },
+  // Section leads: its pastel band is the grouping gutter, frozen with Id.
+  { key: 'section', title: 'Section', width: 130, kind: 'text', nullable: true },
   { key: 'id', title: 'Id', width: 160, kind: 'text' },
   { key: 'label', title: 'Label', width: 200, kind: 'text' },
   { key: 'datatype', title: 'Datatype', width: 110, kind: 'text' },
   { key: 'cardinality', title: 'Cardinality', width: 100, kind: 'text' },
   { key: 'required', title: 'Required', width: 85, kind: 'boolean' },
-  { key: 'section', title: 'Section', width: 150, kind: 'text', nullable: true },
   { key: 'unit', title: 'Unit', width: 90, kind: 'text', nullable: true },
   { key: 'enumeration', title: 'Enumeration', width: 230, kind: 'bubble' },
   { key: 'missing_value_codes', title: 'Missing values', width: 150, kind: 'bubble' },
@@ -352,11 +473,14 @@ export function GridView({
       for (const spec of COLUMNS) {
         if (!wrappedCols.has(spec.key as string)) continue
         const width = (widths[spec.key] ?? spec.width) - 16
-        if (spec.kind === 'text' || spec.kind === 'markdown') {
+        if (spec.kind === 'text') {
           const value = element[spec.key as keyof DataElement]
           if (typeof value !== 'string' || value === '') continue
-          const text = spec.kind === 'markdown' ? stripMarkdown(value) : value
-          tallest = Math.max(tallest, wrappedTextHeight(ctx, text, width))
+          tallest = Math.max(tallest, wrappedTextHeight(ctx, value, width))
+        } else if (spec.kind === 'markdown') {
+          const value = element[spec.key as keyof DataElement]
+          if (typeof value !== 'string' || value === '') continue
+          tallest = Math.max(tallest, layoutMd(ctx, value, width).height)
         } else if (spec.kind === 'bubble') {
           const items = bubbles(spec.key as keyof DataElement, element, false)
           if (items.length === 0) continue
@@ -580,18 +704,62 @@ export function GridView({
         return
       }
 
-      // Text-ish cells: markdown descriptions ALWAYS custom-draw (with the
-      // syntax stripped, so cells show clean prose without clicking); plain
-      // text cells custom-draw only when their column wraps.
+      // Markdown descriptions ALWAYS custom-draw, with real inline styling
+      // (bold / italic / code chips / links) via the mini renderer above.
       const isMarkdown = cell.kind === GridCellKind.Markdown
       const isText = cell.kind === GridCellKind.Text
       const raw =
         (isMarkdown || isText) && typeof (cell as { data?: unknown }).data === 'string'
           ? (cell as { data: string }).data
           : ''
-      const display = isMarkdown ? stripMarkdown(raw) : raw
-      if ((colWrapped || isMarkdown) && display.length > 0) {
-        const pad = theme.cellHorizontalPadding
+      const pad = theme.cellHorizontalPadding
+      if (isMarkdown && raw.length > 0) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(rect.x, rect.y, rect.width, rect.height)
+        ctx.clip()
+        ctx.textBaseline = 'middle'
+        if (colWrapped) {
+          const layout = layoutMd(ctx, raw, rect.width - pad * 2)
+          let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+          const bottom = rect.y + rect.height
+          outer: for (let p = 0; p < layout.paragraphs.length; p++) {
+            if (p > 0) y += PARA_GAP
+            for (const line of layout.paragraphs[p]) {
+              for (const seg of line) drawMdSeg(ctx, seg, rect.x + pad, y)
+              y += LINE_HEIGHT
+              if (y > bottom) break outer
+            }
+          }
+        } else {
+          // Single line: the first laid-out line, ellipsized when more follows.
+          const layout = layoutMd(ctx, raw, 1e9)
+          const segs = layout.paragraphs[0]?.[0] ?? []
+          const yMid = rect.y + rect.height / 2 + 1
+          const maxX = rect.width - pad * 2
+          let x = 0
+          let truncated =
+            layout.paragraphs.length > 1 || (layout.paragraphs[0]?.length ?? 0) > 1
+          for (const seg of segs) {
+            if (seg.x + seg.width > maxX) {
+              truncated = true
+              break
+            }
+            drawMdSeg(ctx, seg, rect.x + pad, yMid)
+            x = seg.x + seg.width
+          }
+          if (truncated) {
+            ctx.font = BASE_FONT
+            ctx.fillStyle = theme.textDark
+            ctx.fillText(' …', rect.x + pad + x, yMid)
+          }
+        }
+        ctx.restore()
+        return
+      }
+
+      // Plain text cells custom-draw only when their column wraps.
+      if (colWrapped && isText && raw.length > 0) {
         const maxWidth = rect.width - pad * 2
         ctx.save()
         ctx.beginPath()
@@ -600,28 +768,16 @@ export function GridView({
         ctx.font = BASE_FONT
         ctx.fillStyle = theme.textDark
         ctx.textBaseline = 'middle'
-        if (colWrapped) {
-          // Paragraph-aware wrapped layout, drawn from the top.
-          let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
-          const bottom = rect.y + rect.height
-          const paragraphs = wrapParagraphs(ctx, display, maxWidth)
-          outer: for (let p = 0; p < paragraphs.length; p++) {
-            if (p > 0) y += PARA_GAP
-            for (const line of paragraphs[p]) {
-              ctx.fillText(line, rect.x + pad, y)
-              y += LINE_HEIGHT
-              if (y > bottom) break outer
-            }
+        let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+        const bottom = rect.y + rect.height
+        const paragraphs = wrapParagraphs(ctx, raw, maxWidth)
+        outer: for (let p = 0; p < paragraphs.length; p++) {
+          if (p > 0) y += PARA_GAP
+          for (const line of paragraphs[p]) {
+            ctx.fillText(line, rect.x + pad, y)
+            y += LINE_HEIGHT
+            if (y > bottom) break outer
           }
-        } else {
-          // Single line, ellipsized (markdown-only path when wrap is off).
-          let line = display.replace(/\s*\n+\s*/g, '  ')
-          const width = ctx.measureText(line).width
-          if (width > maxWidth) {
-            const keep = Math.max(1, Math.floor((line.length * maxWidth) / width) - 1)
-            line = `${line.slice(0, keep)}…`
-          }
-          ctx.fillText(line, rect.x + pad, rect.y + rect.height / 2 + 1)
         }
         ctx.restore()
         return
@@ -642,6 +798,30 @@ export function GridView({
     [onHeaderMenu],
   )
 
+  // Always-visible ⋮ menu indicator on wrappable columns (GDG only draws its
+  // own on hover, and the default triangle reads as a sort arrow). Blue when
+  // the column is wrapped, so the state shows at a glance.
+  const drawHeader: DrawHeaderCallback = useCallback(
+    (args, drawContent) => {
+      drawContent()
+      const { ctx, column, menuBounds } = args
+      if (column.hasMenu !== true) return
+      const cx = menuBounds.x + menuBounds.width / 2
+      const cy = menuBounds.y + menuBounds.height / 2
+      const r = 1.25
+      ctx.save()
+      ctx.beginPath()
+      for (const dy of [-r * 3.5, 0, r * 3.5]) {
+        ctx.moveTo(cx + r, cy + dy)
+        ctx.arc(cx, cy + dy, r, 0, Math.PI * 2)
+      }
+      ctx.fillStyle = wrappedCols.has(column.id as string) ? '#2563eb' : '#9aa2ab'
+      ctx.fill()
+      ctx.restore()
+    },
+    [wrappedCols],
+  )
+
   return (
     <DataEditor
       ref={gridRef}
@@ -650,6 +830,7 @@ export function GridView({
       getCellContent={getCellContent}
       onCellEdited={onCellEdited}
       drawCell={drawCell}
+      drawHeader={drawHeader}
       onRowAppended={onRowAppended}
       onRowMoved={onRowMoved}
       onDelete={onDelete}
@@ -660,7 +841,7 @@ export function GridView({
       showSearch={showSearch}
       onSearchClose={onSearchClose}
       rowMarkers="both"
-      freezeColumns={2}
+      freezeColumns={3}
       getCellsForSelection={true}
       onPaste={true}
       trailingRowOptions={{ sticky: true, tint: true, hint: 'add element…' }}
