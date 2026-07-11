@@ -35,10 +35,16 @@ function highlightScalar(value: string, keyPrefix = ' '): ReactNode {
   )
 }
 
+// A block scalar indicator: `|`, `>`, with optional chomping/indent (|-, >2),
+// possibly followed only by a comment. When a value is one of these, the
+// indented lines that follow are literal string content.
+const BLOCK_SCALAR = /^[|>][+-]?\d?(\s+#.*)?$/
+
+const indentOf = (line: string): number => line.length - line.trimStart().length
+
 function highlightLine(line: string): ReactNode {
   // Whole-line comment.
-  const commentOnly = /^\s*#/.test(line)
-  if (commentOnly) return <span className="y-comment">{line}</span>
+  if (/^\s*#/.test(line)) return <span className="y-comment">{line}</span>
 
   const m = KEY_RE.exec(line)
   if (m) {
@@ -76,13 +82,52 @@ function highlightLine(line: string): ReactNode {
   return line
 }
 
-/** Render highlighted YAML as an array of line nodes (newlines preserved). */
+/** The value part of a "key: value" or "- value" line, for block detection. */
+function valueOfLine(line: string): string | null {
+  const m = KEY_RE.exec(line)
+  if (m) {
+    const after = line.slice(m[0].length - (m[5] === '' ? 0 : m[5].length))
+    return after.trim()
+  }
+  const listM = /^(\s*)(-\s+)(.*)$/.exec(line)
+  if (listM) return listM[3].trim()
+  return null
+}
+
+/**
+ * Render highlighted YAML, newline-preserving. Stateful across lines so block
+ * scalars (`key: |-` / `>`), whose following indented lines are literal
+ * string content, get the string color rather than falling through as plain.
+ */
 export function highlightYaml(text: string): ReactNode {
   const lines = text.split('\n')
-  return lines.map((line, i) => (
-    <Fragment key={i}>
-      {highlightLine(line)}
-      {i < lines.length - 1 ? '\n' : null}
-    </Fragment>
-  ))
+  // Indent of the key that opened the current block scalar, or null.
+  let blockIndent: number | null = null
+
+  return lines.map((line, i) => {
+    let node: ReactNode
+
+    if (blockIndent !== null) {
+      // Inside a block scalar: blank lines and lines indented deeper than the
+      // opener stay content; anything at/left of the opener ends the block.
+      if (line.trim() === '' || indentOf(line) > blockIndent) {
+        node = line === '' ? line : <span className="y-str">{line}</span>
+      } else {
+        blockIndent = null
+      }
+    }
+
+    if (node === undefined) {
+      node = highlightLine(line)
+      const value = valueOfLine(line)
+      if (value !== null && BLOCK_SCALAR.test(value)) blockIndent = indentOf(line)
+    }
+
+    return (
+      <Fragment key={i}>
+        {node}
+        {i < lines.length - 1 ? '\n' : null}
+      </Fragment>
+    )
+  })
 }
