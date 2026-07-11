@@ -733,9 +733,13 @@ export function GridView({
           }
         } else {
           // Single line: the first laid-out line, ellipsized when more follows.
+          // Top-aligned in tall rows, centered in ordinary single-line rows.
           const layout = layoutMd(ctx, raw, 1e9)
           const segs = layout.paragraphs[0]?.[0] ?? []
-          const yMid = rect.y + rect.height / 2 + 1
+          const yMid =
+            rect.height > MIN_ROW_HEIGHT + 2
+              ? rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
+              : rect.y + rect.height / 2 + 1
           const maxX = rect.width - pad * 2
           let x = 0
           let truncated =
@@ -758,8 +762,12 @@ export function GridView({
         return
       }
 
-      // Plain text cells custom-draw only when their column wraps.
-      if (colWrapped && isText && raw.length > 0) {
+      // Plain text cells. Custom-draw (top-aligned) when the column wraps OR
+      // when the row is taller than one line (so short cells in a tall wrapped
+      // row sit at the top instead of floating in the middle). Ordinary
+      // single-line rows fall through to GDG's default renderer.
+      const tallRow = rect.height > MIN_ROW_HEIGHT + 2
+      if (isText && raw.length > 0 && (colWrapped || tallRow)) {
         const maxWidth = rect.width - pad * 2
         ctx.save()
         ctx.beginPath()
@@ -770,7 +778,8 @@ export function GridView({
         ctx.textBaseline = 'middle'
         let y = rect.y + theme.cellVerticalPadding + LINE_HEIGHT / 2 + 1
         const bottom = rect.y + rect.height
-        const paragraphs = wrapParagraphs(ctx, raw, maxWidth)
+        // Wrap only if this column opted into wrapping; otherwise one line.
+        const paragraphs = colWrapped ? wrapParagraphs(ctx, raw, maxWidth) : [[raw]]
         outer: for (let p = 0; p < paragraphs.length; p++) {
           if (p > 0) y += PARA_GAP
           for (const line of paragraphs[p]) {
