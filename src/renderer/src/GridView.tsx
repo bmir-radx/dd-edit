@@ -686,7 +686,10 @@ export function GridView({
       // (so the pills top-align with sibling cells instead of centering).
       const colWrapped = spec !== undefined && wrappedCols.has(spec.key as string)
       const tallRow = rect.height > MIN_ROW_HEIGHT + 2
-      if ((colWrapped || tallRow) && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
+      // Terms always custom-draw (for their teal color); other pill lists only
+      // when wrapped or in a tall row (otherwise GDG's default bubble is fine).
+      const drawBubble = colWrapped || tallRow || spec?.key === 'terms'
+      if (drawBubble && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
         ctx.save()
         ctx.beginPath()
         ctx.rect(rect.x, rect.y, rect.width, rect.height)
@@ -699,6 +702,11 @@ export function GridView({
         // First pill row centered on the shared first-line center, so it lines
         // up with plain text / pills in sibling cells.
         let y = firstLineCenterY(rect.y, rect.height) - PILL_H / 2
+        // Ontology terms get their own (violet) pill color, from the shared
+        // palette; other lists stay neutral gray.
+        const isTerms = spec?.key === 'terms'
+        const pillBg = isTerms ? '#ede9fe' : '#eef1f4'
+        const pillFg = isTerms ? '#6d28d9' : '#374151'
         for (const item of cell.data) {
           const w = Math.min(ctx.measureText(item).width + PILL_PAD_X * 2, right - left)
           if (x > left && x + w > right) {
@@ -708,11 +716,11 @@ export function GridView({
           if (y + PILL_H > rect.y + rect.height) break
           ctx.beginPath()
           ctx.roundRect(x, y, w, PILL_H, PILL_H / 2)
-          ctx.fillStyle = '#eef1f4'
+          ctx.fillStyle = pillBg
           ctx.fill()
           ctx.save()
           ctx.clip()
-          ctx.fillStyle = '#374151'
+          ctx.fillStyle = pillFg
           ctx.fillText(item, x + PILL_PAD_X, y + PILL_H / 2 + 0.5)
           ctx.restore()
           x += w + PILL_GAP

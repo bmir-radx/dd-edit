@@ -296,6 +296,11 @@ pre.preview.stale { opacity: 0.5; }
   opacity: 0.6;
 }
 .tag .tag-x:hover { opacity: 1; background: #d3e0fb; }
+
+/* Ontology-term chips: violet, matching the grid's terms pills. */
+.tag.violet { background: #ede9fe; color: #6d28d9; border-color: #ddd6fe; }
+.tag.violet .tag-x { color: #6d28d9; }
+.tag.violet .tag-x:hover { background: #ddd6fe; }
 .tag-editor .tag-input {
   flex: 1;
   min-width: 90px;

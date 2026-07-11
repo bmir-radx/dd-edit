@@ -108,10 +108,13 @@ export function TagEditor({
   values,
   onChange,
   placeholder,
+  variant,
 }: {
   values: string[]
   onChange: (values: string[]) => void
   placeholder?: string
+  /** Chip color; 'violet' for ontology terms, default blue otherwise. */
+  variant?: 'violet'
 }) {
   const [draft, setDraft] = useState('')
 
@@ -122,10 +125,11 @@ export function TagEditor({
   }
   const removeAt = (i: number) => onChange(values.filter((_, j) => j !== i))
 
+  const tagClass = `tag${variant === 'violet' ? ' violet' : ''}`
   return (
     <div className="tag-editor">
       {values.map((v, i) => (
-        <span className="tag" key={`${v}-${i}`}>
+        <span className={tagClass} key={`${v}-${i}`}>
           <span className="tag-text">{v}</span>
           <button type="button" className="tag-x" title="Remove" onClick={() => removeAt(i)}>
             ×

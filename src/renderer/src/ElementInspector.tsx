@@ -172,6 +172,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             values={(element.terms ?? []) as string[]}
             onChange={(v) => apply((d) => setField(d, index, 'terms', v))}
             placeholder="add a term IRI or OBO id…"
+            variant="violet"
           />
         </div>
       </section>
