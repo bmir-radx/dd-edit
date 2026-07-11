@@ -26,6 +26,7 @@ from dd_redcap.convert import convert_redcap
 from dd_redcap.headers import ConversionError
 from dd_validator.validate import validate as validate_csv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -36,12 +37,27 @@ _TOOLKIT_PACKAGES = ("dd-core", "dd-linkml", "dd-api", "dd-validate", "dd-printe
 
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
+    # OPTIONS preflights carry no Authorization header by design; they are
+    # answered by the CORS middleware and expose nothing.
     token = os.environ.get("DD_EDIT_TOKEN")
-    if token and request.url.path != "/health":
+    if token and request.method != "OPTIONS" and request.url.path != "/health":
         supplied = request.headers.get("authorization", "")
         if supplied != f"Bearer {token}":
             return JSONResponse({"detail": "missing or bad token"}, status_code=401)
     return await call_next(request)
+
+
+# The Electron renderer is a different origin (the Vite dev server in dev,
+# file:// in production), so without CORS headers Chromium blocks every fetch.
+# Any-origin is fine HERE because CORS is not this service's security boundary:
+# it binds to 127.0.0.1 only and every data-bearing endpoint requires the
+# bearer token, which browsers never attach on their own.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["authorization", "content-type"],
+)
 
 
 def _versions() -> dict[str, str]:

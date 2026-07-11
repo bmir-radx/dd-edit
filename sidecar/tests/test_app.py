@@ -105,3 +105,29 @@ def test_token_enforced_when_set(client, monkeypatch):
     assert client.get("/health").status_code == 200  # exempt
     ok = client.get("/meta", headers={"Authorization": "Bearer sekrit"})
     assert ok.status_code == 200
+
+
+def test_cors_allows_the_renderer_origin(client, monkeypatch):
+    # The Electron renderer is cross-origin (Vite dev server / file://); the
+    # sidecar must answer CORS preflights — without a token, since browsers
+    # never attach Authorization to preflights.
+    monkeypatch.setenv("DD_EDIT_TOKEN", "sekrit")
+    preflight = client.options(
+        "/convert",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "*"
+    assert "authorization" in preflight.headers["access-control-allow-headers"].lower()
+
+    # And the actual cross-origin response carries the allow-origin header.
+    res = client.get(
+        "/meta",
+        headers={"Origin": "http://localhost:5173", "Authorization": "Bearer sekrit"},
+    )
+    assert res.status_code == 200
+    assert res.headers["access-control-allow-origin"] == "*"
