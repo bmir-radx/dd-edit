@@ -1,0 +1,14 @@
+# Node / Electron
+node_modules/
+out/
+dist/
+
+# Python sidecar
+sidecar/.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# OS / editors
+.DS_Store
+.idea/
