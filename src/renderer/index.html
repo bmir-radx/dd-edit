@@ -6,9 +6,14 @@
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://localhost:*; style-src 'self' 'unsafe-inline'" />
     <title>dd-edit</title>
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Glide Data Grid renders its overlay cell editors into this portal. -->
+    <div id="portal" style="position: fixed; left: 0; top: 0; z-index: 9999;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

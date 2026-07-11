@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bmir-radx/radx-data-dictionary-specification/api/dd_api/dd-json.schema.json",
+  "title": "Data Dictionary JSON (dd-json)",
+  "description": "The canonical JSON representation of a data dictionary produced by dd_api's DataDictionary.to_json() and accepted by from_json(). A versioned wrapper around a list of data elements that mirror the typed model.",
+  "type": "object",
+  "required": ["format", "version", "elements"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "dd-json",
+      "description": "Format discriminator; always the literal \"dd-json\"."
+    },
+    "version": {
+      "const": 1,
+      "description": "Schema version of this representation. Consumers should reject versions they do not understand."
+    },
+    "elements": {
+      "type": "array",
+      "description": "The data elements, in order (element order mirrors the order of fields in the datafile).",
+      "items": { "$ref": "#/$defs/dataElement" }
+    }
+  },
+  "$defs": {
+    "enumItem": {
+      "type": "object",
+      "description": "One permissible value: the value as it appears in the datafile, a human-readable label, and an optional ontology term IRI. In the compact form a null iri may be omitted.",
+      "required": ["value", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string" },
+        "label": { "type": "string" },
+        "iri": { "type": ["string", "null"] }
+      }
+    },
+    "dataElement": {
+      "type": "object",
+      "description": "One field of the datafile. In the full form, blank single-valued fields are null and list-valued fields are arrays (possibly empty). In the compact form (to_json(compact=True)) those null/empty fields may be omitted; only the keys below are always present.",
+      "required": ["id", "label", "datatype", "cardinality", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The field's unique identifier (variable name)."
+        },
+        "label": {
+          "type": "string",
+          "description": "The field's human-readable name."
+        },
+        "datatype": {
+          "type": "string",
+          "description": "A datatype name from the specification (e.g. integer, string, date_mdy)."
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Alternative identifiers for the field."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "What the field means (may contain Markdown); null when absent."
+        },
+        "section": {
+          "type": ["string", "null"],
+          "description": "The section (group of related fields) this element belongs to; null when the dictionary has no sections."
+        },
+        "cardinality": {
+          "enum": ["single", "multiple"],
+          "description": "Whether one datafile cell holds one value (single) or several (multiple)."
+        },
+        "terms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Ontology term identifiers (full IRIs or compact OBO ids)."
+        },
+        "pattern": {
+          "type": ["string", "null"],
+          "description": "An XSD-flavour regular expression values must match; null when none."
+        },
+        "unit": {
+          "type": ["string", "null"],
+          "description": "The unit of measure as written; null when none."
+        },
+        "enumeration": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/enumItem" },
+          "description": "The permissible values, when the field is restricted to a fixed choice list; empty otherwise."
+        },
+        "missing_value_codes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/enumItem" },
+          "description": "Codes that stand for 'no data' (refused, not collected, ...)."
+        },
+        "precondition": {
+          "type": ["string", "null"],
+          "description": "The condition under which the field holds a value (the Precondition grammar); null when the field always applies."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the field must hold a value (subject to its precondition)."
+        },
+        "examples": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Example values for the field."
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Free-text notes; null when absent."
+        },
+        "provenance": {
+          "type": ["string", "null"],
+          "description": "Where the field came from (study, instrument, URL); null when absent."
+        },
+        "see_also": {
+          "type": ["string", "null"],
+          "description": "A URL with more information; null when absent."
+        }
+      }
+    }
+  }
+}

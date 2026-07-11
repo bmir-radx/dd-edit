@@ -1,5 +1,6 @@
 /**
- * Electron main process: owns the Python sidecar's lifecycle and the window.
+ * Electron main process: owns the Python sidecar's lifecycle, file dialogs +
+ * disk I/O, and the application menu.
  *
  * Startup: pick a free port -> spawn the sidecar with a fresh bearer token ->
  * poll /health until it answers -> open the window. The renderer gets the
@@ -9,16 +10,19 @@
  *   DD_EDIT_SIDECAR_URL  use an already-running sidecar (e.g. uvicorn --reload)
  *   DD_EDIT_SIDECAR_CMD  custom spawn command, e.g. "/path/python -m dd_edit_sidecar"
  */
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 
 const token = randomBytes(24).toString('hex')
 let sidecar: ChildProcess | null = null
 let sidecarUrl: string | null = process.env.DD_EDIT_SIDECAR_URL ?? null
+
+// ---------------------------------------------------------------- sidecar
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -80,10 +84,83 @@ async function startSidecar(): Promise<void> {
   await waitForHealth(sidecarUrl)
 }
 
+// ------------------------------------------------------------- file I/O
+
+const DICTIONARY_FILTERS = [
+  { name: 'Data dictionaries (CSV, LinkML, dd-json)', extensions: ['csv', 'yaml', 'yml', 'json'] },
+  { name: 'All files', extensions: ['*'] },
+]
+const REDCAP_FILTERS = [
+  { name: 'REDCap data dictionary export (CSV)', extensions: ['csv'] },
+  { name: 'All files', extensions: ['*'] },
+]
+
+async function openAndRead(filters: typeof DICTIONARY_FILTERS) {
+  const res = await dialog.showOpenDialog({ properties: ['openFile'], filters })
+  const file = res.filePaths[0]
+  if (res.canceled || !file) return null
+  return { path: file, content: await readFile(file, 'utf8') }
+}
+
+ipcMain.handle('sidecar-info', () => ({
+  url: sidecarUrl,
+  token: process.env.DD_EDIT_SIDECAR_URL ? null : token,
+}))
+ipcMain.handle('dialog:open', () => openAndRead(DICTIONARY_FILTERS))
+ipcMain.handle('dialog:open-redcap', () => openAndRead(REDCAP_FILTERS))
+ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
+  const res = await dialog.showSaveDialog({ defaultPath: defaultName, filters: DICTIONARY_FILTERS })
+  return res.canceled || !res.filePath ? null : res.filePath
+})
+ipcMain.handle('file:save', async (_event, filePath: string, content: string) => {
+  await writeFile(filePath, content, 'utf8')
+})
+
+// ----------------------------------------------------------------- menu
+
+function sendMenu(action: string): void {
+  BrowserWindow.getFocusedWindow()?.webContents.send('menu', action)
+}
+
+function buildMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new') },
+        { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => sendMenu('open') },
+        { type: 'separator' },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenu('save') },
+        { label: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', click: () => sendMenu('save-as') },
+        { type: 'separator' },
+        { label: 'Import REDCap Export…', click: () => sendMenu('import-redcap') },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        // Document-level undo/redo lives in the renderer's store, not the DOM.
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => sendMenu('undo') },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', click: () => sendMenu('redo') },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+// -------------------------------------------------------------- lifecycle
+
 function createWindow(): void {
   const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    width: 1400,
+    height: 900,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -97,12 +174,8 @@ function createWindow(): void {
   }
 }
 
-ipcMain.handle('sidecar-info', () => ({
-  url: sidecarUrl,
-  token: process.env.DD_EDIT_SIDECAR_URL ? null : token,
-}))
-
 app.whenReady().then(async () => {
+  buildMenu()
   try {
     await startSidecar()
   } catch (err) {
