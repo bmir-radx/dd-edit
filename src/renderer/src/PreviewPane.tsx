@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor } from './model/store'
 import { sidecar } from './sidecar'
 import type { DdDocument } from './types/document'
+import { highlightYaml } from './yamlHighlight'
 
 export function PreviewPane({
   format,
@@ -60,7 +61,7 @@ export function PreviewPane({
   }, [scoped, format, enabled, title])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
       {scoping ? (
         <div className="scope-banner">
           Showing {selectedRows.length} selected {selectedRows.length === 1 ? 'element' : 'elements'}
@@ -74,11 +75,19 @@ export function PreviewPane({
           sandbox=""
           srcDoc={text}
           title="Rendered dictionary"
-          style={{ flex: 1, border: 'none', opacity: error ? 0.5 : 1, background: '#fff' }}
+          style={{
+            flex: 1,
+            width: '100%',
+            border: 'none',
+            opacity: error ? 0.5 : 1,
+            background: '#fff',
+          }}
         />
       ) : (
         <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-          <pre className={`preview${error ? ' stale' : ''}`}>{text}</pre>
+          <pre className={`preview${error ? ' stale' : ''}`}>
+            {format === 'linkml' ? highlightYaml(text) : text}
+          </pre>
         </div>
       )}
     </div>
