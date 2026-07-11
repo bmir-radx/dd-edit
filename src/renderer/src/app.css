@@ -242,6 +242,20 @@ pre.preview.stale { opacity: 0.5; }
   margin-bottom: 6px;
   align-items: center;
 }
+/* The value is the stored code — render the input as a blue code chip,
+   matching the enum-value pills elsewhere; the label stays plain text. */
+.inspector .enum-item input.value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: #1d4ed8;
+  background: #eef4ff;
+  border-color: #d3e0fb;
+}
+.inspector .enum-item input.value:focus {
+  background: #fff;
+}
 .enum-item input.iri { grid-column: 1 / 3; font-size: 11px; color: var(--text-dim); }
 .enum-item .remove {
   padding: 0;

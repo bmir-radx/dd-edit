@@ -290,7 +290,12 @@ function EnumItemsEditor({
     <div>
       {items.map((item, i) => (
         <div className="enum-item" key={i}>
-          <CommitInput value={item.value} placeholder="value" onCommit={(v) => update(i, { value: v })} />
+          <CommitInput
+            className="value"
+            value={item.value}
+            placeholder="value"
+            onCommit={(v) => update(i, { value: v })}
+          />
           <CommitInput value={item.label} placeholder="label" onCommit={(v) => update(i, { label: v })} />
           <button className="remove" title="Remove" onClick={() => remove(i)}>×</button>
           <CommitInput
