@@ -301,7 +301,7 @@ function EnumItemsEditor({
           <CommitInput
             className="iri"
             value={item.iri ?? ''}
-            placeholder="ontology IRI (optional)"
+            placeholder="Ontology term IRI (optional)"
             onCommit={(v) => update(i, { iri: v === '' ? null : v })}
           />
         </div>
