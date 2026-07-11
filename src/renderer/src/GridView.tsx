@@ -177,11 +177,20 @@ function pillColors(key: 'cardinality' | 'datatype', text: string) {
   return text === 'multiple' ? { bg: '#ede9fe', fg: '#6d28d9' } : { bg: '#f1f5f9', fg: '#475569' }
 }
 
-/** A stable pastel per section name (hash -> hue), light enough for text. */
-function sectionTint(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
-  return `hsl(${h} 60% 94%)`
+/**
+ * Pastel per section, assigned by order of first appearance stepping the hue
+ * wheel by the golden angle — consecutive sections land ~137° apart, so
+ * neighbors are always clearly distinct (a name hash can collide, and did:
+ * "Consent" and "Demographics" hashed to near-identical lavenders).
+ */
+function sectionTints(elements: readonly DataElement[]): Map<string, string> {
+  const tints = new Map<string, string>()
+  for (const element of elements) {
+    const name = element.section ?? ''
+    if (name === '' || tints.has(name)) continue
+    tints.set(name, `hsl(${Math.round((tints.size * 137.5) % 360)} 60% 94%)`)
+  }
+  return tints
 }
 
 type ScalarKey =
@@ -304,6 +313,7 @@ export function GridView({
   })
 
   const baselineRefs = useMemo(() => new Set<DataElement>(baseline.elements), [baseline])
+  const sectionColors = useMemo(() => sectionTints(doc.elements), [doc])
 
   // Row -> worst level, and "row|field" -> worst level, for the tints.
   const { rowLevels, cellLevels } = useMemo(() => {
@@ -415,7 +425,10 @@ export function GridView({
       // its stable pastel as the cell background (validation tint wins).
       const over: Record<string, string> = {}
       if (tint) over.bgCell = tint
-      if (spec.key === 'section' && text !== '' && !tint) over.bgCell = sectionTint(text)
+      if (spec.key === 'section' && text !== '' && !tint) {
+        const sectionBg = sectionColors.get(text)
+        if (sectionBg) over.bgCell = sectionBg
+      }
       return {
         kind: GridCellKind.Text,
         data: text,
@@ -425,7 +438,7 @@ export function GridView({
         ...(Object.keys(over).length > 0 ? { themeOverride: over } : {}),
       }
     },
-    [doc, cellLevels, baselineRefs, wrappedCols],
+    [doc, cellLevels, baselineRefs, wrappedCols, sectionColors],
   )
 
   const onCellEdited = useCallback(
