@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react'
 marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
-import { CommitInput, CommitTextarea } from './inputs'
+import { CommitInput, CommitTextarea, CommitWrapInput } from './inputs'
 import type { DataElement, EnumItem } from './types/document'
 
 type NullableTextKey =
@@ -86,7 +86,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         </label>
         <label className="field">
           <span>Label <Dot k="label" /></span>
-          <CommitInput value={element.label} onCommit={commitText('label')} />
+          <CommitWrapInput value={element.label} onCommit={commitText('label')} />
         </label>
         <label className="field">
           <span>Section <Dot k="section" /></span>
@@ -233,9 +233,13 @@ function DescriptionField({
 
   return (
     <label className="field">
-      <span>
-        Description — Markdown{' '}
-        {changed ? <span className="mod-dot" title="Modified since open / last save">●</span> : null}
+      <span className="field-head">
+        <span>
+          Description — Markdown{' '}
+          {changed ? (
+            <span className="mod-dot" title="Modified since open / last save">●</span>
+          ) : null}
+        </span>
         <span className="seg-toggle" role="tablist">
           <button
             type="button"

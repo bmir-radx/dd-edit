@@ -215,6 +215,15 @@ pre.preview.stale { opacity: 0.5; }
   border-color: var(--accent);
 }
 .inspector textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
+/* Auto-growing single-value field (e.g. Label): wraps, no manual resize. */
+.inspector textarea.wrap-input {
+  resize: none;
+  min-height: 0;
+  overflow: hidden;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .inspector input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .inspector .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .inspector .check {
@@ -268,10 +277,19 @@ button.toggled {
 
 /* ------------------------------------------------- description markdown */
 
+/* Header row for a field whose label carries a control on the right. */
+.inspector label.field > span.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inspector .field-head > span { margin-bottom: 0; }
+
 /* Segmented Edit/Preview control — one pill, sliding highlight. */
 .seg-toggle {
-  float: right;
   display: inline-flex;
+  flex: none;
   padding: 2px;
   gap: 0;
   background: #e6e8ec;
