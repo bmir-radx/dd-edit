@@ -1,14 +1,18 @@
 /**
- * The editor shell: toolbar (file state + actions), the grid, and the CSV
- * preview. File dialogs and disk I/O live in the main process; parsing and
+ * The editor shell: toolbar, grid, tabbed right panel (element inspector +
+ * CSV / LinkML previews), status bar, and a welcome screen for the empty
+ * state. File dialogs and disk I/O live in the main process; parsing and
  * serialization go through the sidecar; the document lives in the store.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ElementInspector } from './ElementInspector'
 import { GridView } from './GridView'
-import { newDocument } from './model/document'
+import { emptyElement, insertElement, newDocument } from './model/document'
 import { useEditor } from './model/store'
 import { parseToDocument, serializeForPath, sidecar } from './sidecar'
 import { PreviewPane } from './PreviewPane'
+
+type PanelTab = 'element' | 'csv' | 'linkml'
 
 function baseName(path: string | null): string {
   if (!path) return 'Untitled'
@@ -16,9 +20,15 @@ function baseName(path: string | null): string {
 }
 
 export function App() {
-  const { doc, filePath, dirty, loadDocument, undo, redo, markSaved } = useEditor()
+  const { doc, filePath, dirty, loadDocument, apply, undo, redo, markSaved, undoStack, redoStack } =
+    useEditor()
   const [status, setStatus] = useState('starting sidecar…')
-  const [showPreview, setShowPreview] = useState(true)
+  const [datatypes, setDatatypes] = useState<string[]>([])
+  const [panelTab, setPanelTab] = useState<PanelTab | null>('element')
+  const [cursorRow, setCursorRow] = useState<number | null>(null)
+  const [showSearch, setShowSearch] = useState(false)
+
+  const isEmpty = doc.elements.length === 0 && filePath === null && !dirty
 
   // ------------------------------------------------------------ commands
 
@@ -29,6 +39,7 @@ export function App() {
   const doNew = useCallback(() => {
     if (!confirmDiscard()) return
     loadDocument(newDocument(), null, false)
+    setCursorRow(null)
   }, [confirmDiscard, loadDocument])
 
   const doOpen = useCallback(async () => {
@@ -37,6 +48,7 @@ export function App() {
     if (!file) return
     try {
       loadDocument(await parseToDocument(file.content), file.path)
+      setCursorRow(null)
     } catch (err) {
       // Sniff-and-offer: a CSV that fails dictionary parsing but imports as
       // REDCap gets offered as an import instead of a bare error.
@@ -49,6 +61,7 @@ export function App() {
           )
         ) {
           loadDocument(JSON.parse(imported.content), null)
+          setCursorRow(null)
         }
       } catch {
         window.alert(`Could not open ${baseName(file.path)}:\n${err instanceof Error ? err.message : err}`)
@@ -63,6 +76,7 @@ export function App() {
     try {
       const imported = await sidecar.importRedcap(file.content)
       loadDocument(JSON.parse(imported.content), null) // untitled + dirty: an import, not an open
+      setCursorRow(null)
     } catch (err) {
       window.alert(`REDCap import failed:\n${err instanceof Error ? err.message : err}`)
     }
@@ -93,6 +107,13 @@ export function App() {
     else await doSaveAs()
   }, [saveTo, doSaveAs])
 
+  const addElement = useCallback(() => {
+    const at = cursorRow === null ? useEditor.getState().doc.elements.length : cursorRow + 1
+    apply((d) => insertElement(d, at, emptyElement()))
+    setCursorRow(at)
+    setPanelTab('element')
+  }, [apply, cursorRow])
+
   // ------------------------------------------------------- menu wiring
 
   const handlers = useRef<Record<string, () => void>>({})
@@ -110,6 +131,18 @@ export function App() {
     return window.ddEdit.onMenu((action) => handlers.current[action]?.())
   }, [])
 
+  // Cmd/Ctrl+F opens the grid's search overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        setShowSearch(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // ------------------------------------------------------------ startup
 
   useEffect(() => {
@@ -117,9 +150,8 @@ export function App() {
       try {
         const health = await sidecar.health()
         const meta = await sidecar.meta()
-        setStatus(
-          `toolkit ${health.versions['dd-api'] ?? '?'} · ${meta.datatypes.length} datatypes`,
-        )
+        setDatatypes(meta.datatypes)
+        setStatus(`toolkit ${health.versions['dd-api'] ?? '?'}`)
       } catch (e) {
         setStatus(`sidecar error: ${e instanceof Error ? e.message : e}`)
       }
@@ -132,55 +164,102 @@ export function App() {
 
   // -------------------------------------------------------------- layout
 
-  const button = { padding: '4px 10px', fontSize: 13 } as const
+  const panelOpen = panelTab !== null
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 10px',
-          borderBottom: '1px solid #ddd',
-          fontFamily: 'system-ui',
-        }}
-      >
-        <strong style={{ fontSize: 14 }}>
+    <div className="app">
+      <header className="toolbar">
+        <span className="file-name">
           {baseName(filePath)}
-          {dirty ? ' •' : ''}
-        </strong>
-        <span style={{ flex: 1 }} />
-        <button style={button} onClick={doOpen}>Open…</button>
-        <button style={button} onClick={() => void doSave()}>Save</button>
-        <button style={button} onClick={() => void doImportRedcap()}>Import REDCap…</button>
-        <button style={button} onClick={undo}>Undo</button>
-        <button style={button} onClick={redo}>Redo</button>
-        <button style={button} onClick={() => setShowPreview((v) => !v)}>
-          {showPreview ? 'Hide preview' : 'Show preview'}
+          {dirty ? <span className="dirty-dot"> •</span> : null}
+        </span>
+        <div className="group">
+          <button onClick={doNew}>New</button>
+          <button onClick={() => void doOpen()}>Open…</button>
+          <button onClick={() => void doSave()}>Save</button>
+        </div>
+        <button onClick={() => void doImportRedcap()}>Import REDCap…</button>
+        <span className="sep" />
+        <div className="group">
+          <button onClick={addElement}>+ Element</button>
+        </div>
+        <div className="group">
+          <button onClick={undo} disabled={undoStack.length === 0} title="Undo (⌘Z)">↩ Undo</button>
+          <button onClick={redo} disabled={redoStack.length === 0} title="Redo (⇧⌘Z)">↪ Redo</button>
+        </div>
+        <button onClick={() => setShowSearch(true)} title="Search (⌘F)">Search</button>
+        <span className="spacer" />
+        <button onClick={() => setPanelTab(panelOpen ? null : 'element')}>
+          {panelOpen ? 'Hide panel' : 'Show panel'}
         </button>
       </header>
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div style={{ flex: 2, minWidth: 0 }}>
-          <GridView />
-        </div>
-        {showPreview ? (
-          <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #ddd' }}>
-            <PreviewPane />
+      <div className="main">
+        {isEmpty ? (
+          <div className="welcome">
+            <h2>dd-edit</h2>
+            <div>Edit data dictionaries like a spreadsheet.</div>
+            <div className="actions">
+              <button className="primary" onClick={() => void doOpen()}>Open a dictionary…</button>
+              <button onClick={() => void doImportRedcap()}>Import a REDCap export…</button>
+              <button onClick={addElement}>Start from scratch</button>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              Opens CSV, LinkML YAML, and dd-json. <kbd>⌘O</kbd>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <>
+            <div className="grid-host">
+              <GridView
+                onCursorRow={setCursorRow}
+                showSearch={showSearch}
+                onSearchClose={() => setShowSearch(false)}
+              />
+            </div>
+            {panelOpen ? (
+              <aside className="panel">
+                <div className="tabs">
+                  <button
+                    className={panelTab === 'element' ? 'active' : ''}
+                    onClick={() => setPanelTab('element')}
+                  >
+                    Element
+                  </button>
+                  <button
+                    className={panelTab === 'csv' ? 'active' : ''}
+                    onClick={() => setPanelTab('csv')}
+                  >
+                    CSV
+                  </button>
+                  <button
+                    className={panelTab === 'linkml' ? 'active' : ''}
+                    onClick={() => setPanelTab('linkml')}
+                  >
+                    LinkML
+                  </button>
+                </div>
+                <div className="body">
+                  {panelTab === 'element' ? (
+                    <ElementInspector row={cursorRow} datatypes={datatypes} />
+                  ) : (
+                    <PreviewPane format={panelTab} enabled={true} />
+                  )}
+                </div>
+              </aside>
+            ) : null}
+          </>
+        )}
       </div>
 
-      <footer
-        style={{
-          padding: '3px 10px',
-          fontSize: 12,
-          color: '#666',
-          borderTop: '1px solid #ddd',
-          fontFamily: 'system-ui',
-        }}
-      >
-        {doc.elements.length} elements · {status}
+      <footer className="statusbar">
+        <span>{doc.elements.length} elements</span>
+        {cursorRow !== null && doc.elements[cursorRow] ? (
+          <span>
+            row {cursorRow + 1}: <code>{doc.elements[cursorRow].id || '(no id)'}</code>
+          </span>
+        ) : null}
+        <span className="spacer" />
+        <span>{status}</span>
       </footer>
     </div>
   )

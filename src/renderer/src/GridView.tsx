@@ -78,7 +78,14 @@ function summarize(key: keyof DataElement, element: DataElement): string {
   return list.join(' | ')
 }
 
-export function GridView() {
+export interface GridViewProps {
+  /** Reports the row under the cursor (or null) so the inspector can follow. */
+  onCursorRow: (row: number | null) => void
+  showSearch: boolean
+  onSearchClose: () => void
+}
+
+export function GridView({ onCursorRow, showSearch, onSearchClose }: GridViewProps) {
   const doc = useEditor((s) => s.doc)
   const apply = useEditor((s) => s.apply)
 
@@ -167,6 +174,14 @@ export function GridView() {
     [apply],
   )
 
+  const onSelectionChange = useCallback(
+    (sel: GridSelection) => {
+      setSelection(sel)
+      onCursorRow(sel.current ? sel.current.cell[1] : (sel.rows.toArray()[0] ?? null))
+    },
+    [onCursorRow],
+  )
+
   const onColumnResize = useCallback((column: GridColumn, newSize: number) => {
     if (column.id) setWidths((w) => ({ ...w, [column.id as string]: newSize }))
   }, [])
@@ -182,7 +197,9 @@ export function GridView() {
       onDelete={onDelete}
       onColumnResize={onColumnResize}
       gridSelection={selection}
-      onGridSelectionChange={setSelection}
+      onGridSelectionChange={onSelectionChange}
+      showSearch={showSearch}
+      onSearchClose={onSearchClose}
       rowMarkers="both"
       freezeColumns={1}
       getCellsForSelection={true}
@@ -192,6 +209,16 @@ export function GridView() {
       height="100%"
       smoothScrollX
       smoothScrollY
+      theme={{
+        accentColor: '#2563eb',
+        accentLight: '#eff6ff',
+        headerFontStyle: '600 12px',
+        baseFontStyle: '13px',
+        bgHeader: '#f6f8fa',
+        textHeader: '#1f2328',
+        borderColor: '#e9ecef',
+      }}
+      getRowThemeOverride={(row) => (row % 2 === 1 ? { bgCell: '#fafbfc' } : undefined)}
     />
   )
 }
