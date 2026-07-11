@@ -125,16 +125,14 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         />
         Required <Dot k="required" />
       </label>
-      <div className="row2">
-        <label className="field">
-          <span>Unit <Dot k="unit" /></span>
-          <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
-        </label>
-        <label className="field">
-          <span>Pattern (regex) <Dot k="pattern" /></span>
-          <CommitInput value={text('pattern')} onCommit={commitNullable('pattern')} />
-        </label>
-      </div>
+      <label className="field">
+        <span>Unit <Dot k="unit" /></span>
+        <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
+      </label>
+      <label className="field">
+        <span>Pattern (regex) <Dot k="pattern" /></span>
+        <CommitInput className="mono" value={text('pattern')} onCommit={commitNullable('pattern')} />
+      </label>
       <label className="field">
         <span>Precondition <Dot k="precondition" /></span>
         <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />

@@ -340,36 +340,85 @@ export function GridView({
   // pills. The cells stay ordinary Text cells, so overlay editing, copy/paste,
   // and search all keep working; only the painting changes. The validation
   // background (painted before content) still shows around the pill.
-  const drawCell: DrawCellCallback = useCallback((args, drawContent) => {
-    const { ctx, rect, col, cell, theme } = args
-    const spec = COLUMNS[col]
-    const key = spec?.key
-    if (
-      (key === 'section' || key === 'cardinality' || key === 'datatype') &&
-      cell.kind === GridCellKind.Text &&
-      cell.displayData !== ''
-    ) {
-      const text = cell.displayData
-      const { bg, fg } = pillColors(key, text)
-      ctx.save()
-      ctx.font = `12px ${theme.fontFamily}`
-      const width = Math.min(ctx.measureText(text).width + 16, rect.width - 12)
-      const height = 20
-      const x = rect.x + 6
-      const y = rect.y + (rect.height - height) / 2
-      ctx.beginPath()
-      ctx.roundRect(x, y, width, height, 10)
-      ctx.fillStyle = bg
-      ctx.fill()
-      ctx.clip() // keep long text inside the pill
-      ctx.fillStyle = fg
-      ctx.textBaseline = 'middle'
-      ctx.fillText(text, x + 8, y + height / 2 + 0.5)
-      ctx.restore()
-    } else {
+  //
+  // Wrap mode is ALSO drawn here: wrapping long text (including markdown
+  // descriptions) by hand makes the behavior deterministic instead of
+  // depending on the grid's internal allowWrapping plumbing.
+  const drawCell: DrawCellCallback = useCallback(
+    (args, drawContent) => {
+      const { ctx, rect, col, cell, theme } = args
+      const spec = COLUMNS[col]
+      const key = spec?.key
+
+      if (
+        (key === 'section' || key === 'cardinality' || key === 'datatype') &&
+        cell.kind === GridCellKind.Text &&
+        cell.displayData !== ''
+      ) {
+        const text = cell.displayData
+        const { bg, fg } = pillColors(key, text)
+        ctx.save()
+        ctx.font = `12px ${theme.fontFamily}`
+        const width = Math.min(ctx.measureText(text).width + 16, rect.width - 12)
+        const height = 20
+        const x = rect.x + 6
+        const y = rect.y + (rect.height - height) / 2
+        ctx.beginPath()
+        ctx.roundRect(x, y, width, height, 10)
+        ctx.fillStyle = bg
+        ctx.fill()
+        ctx.clip() // keep long text inside the pill
+        ctx.fillStyle = fg
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, x + 8, y + height / 2 + 0.5)
+        ctx.restore()
+        return
+      }
+
+      const wrappable =
+        (cell.kind === GridCellKind.Text || cell.kind === GridCellKind.Markdown) &&
+        typeof (cell as { data?: unknown }).data === 'string'
+      const wrapData = wrappable ? ((cell as { data: string }).data ?? '') : ''
+      if (wrapText && wrappable && wrapData.length > 0) {
+        const pad = theme.cellHorizontalPadding
+        const maxWidth = rect.width - pad * 2
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(rect.x, rect.y, rect.width, rect.height)
+        ctx.clip()
+        ctx.font = `${theme.baseFontStyle} ${theme.fontFamily}`
+        ctx.fillStyle = theme.textDark
+        ctx.textBaseline = 'middle'
+        const lineHeight = 17
+        let y = rect.y + theme.cellVerticalPadding + lineHeight / 2 + 1
+        const bottom = rect.y + rect.height
+        outer: for (const paragraph of wrapData.split('\n')) {
+          let line = ''
+          for (const word of paragraph.split(/\s+/)) {
+            const candidate = line === '' ? word : `${line} ${word}`
+            if (line !== '' && ctx.measureText(candidate).width > maxWidth) {
+              ctx.fillText(line, rect.x + pad, y)
+              y += lineHeight
+              if (y > bottom) break outer
+              line = word
+            } else {
+              line = candidate
+            }
+          }
+          if (line !== '') {
+            ctx.fillText(line, rect.x + pad, y)
+            y += lineHeight
+            if (y > bottom) break
+          }
+        }
+        ctx.restore()
+        return
+      }
+
       drawContent()
-    }
-  }, [])
+    },
+    [wrapText],
+  )
 
   return (
     <DataEditor
