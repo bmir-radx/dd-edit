@@ -38,18 +38,13 @@ how one field renders without scrolling the whole schema:
 
 Still on the list: in-grid enumeration editing and collapsible section groups.
 
-## Architecture in one paragraph
-
-An Electron app (React + TypeScript) that owns the document — the toolkit's
-canonical [dd-json](https://github.com/bmir-radx/radx-data-dictionary-specification/blob/main/api/dd_api/dd-json.schema.json)
-representation — and a **stateless Python sidecar** (FastAPI on a random
-localhost port) that wraps the released toolkit packages: `dd-api` for
-conversions, `dd-validate` for findings, `dd-printer` for the HTML preview,
-and `dd-redcap` for REDCap import. See [DESIGN.md](DESIGN.md).
-
 ## Development
 
-Two one-time setups, then one command.
+The app is two processes: the Electron/React editor owns the document, and a
+stateless Python sidecar (FastAPI, localhost) wraps the released toolkit
+packages for conversion, validation, rendering, and REDCap import — see
+[DESIGN.md](DESIGN.md) for the full picture. Hence two one-time setups, then
+one command.
 
 ```sh
 # 1. Python sidecar
