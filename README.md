@@ -9,33 +9,73 @@ REDCap data dictionary exports import directly.
 
 ![dd-edit editing a data dictionary: the spreadsheet grid with section colors, datatype pills, and enumerations on the left; the element inspector with precondition, unit, and ontology-term fields on the right](docs/screenshot.png)
 
-**Status: working editor.** Milestones 1–4 of the [design](DESIGN.md) are in
-place — the app opens, edits, validates, and saves real dictionaries:
+## Getting the app
 
-- **Spreadsheet grid**: inline editing, fill handle, range selection, TSV
-  copy/paste that interoperates with Excel/Sheets, row add/delete/drag-reorder,
-  and undo/redo over the document model.
-- **Element inspector**: structured editing of every field — a precondition
-  editor with grammar type-ahead and a live read-back of the parsed
-  expression, datatype/cardinality pickers, UCUM unit assistance,
-  enumeration / missing-value / ontology-term editors (terms resolve their
-  human-readable labels via OLS), and a Markdown description editor with
-  preview.
-- **Live previews**: the CSV (rendered as a table), the LinkML YAML, and the
-  `dd-printer` HTML page, debounced as you type.
-- **Validation**: `dd-validate` findings appear as cell tints and a problems
-  panel; the CSV's line numbers map 1:1 onto grid rows.
-- **REDCap import**, and open/save across all three toolkit formats
-  (CSV / LinkML YAML / dd-json).
-- **Installers** (milestone 5): `npm run dist` produces a macOS app with the
-  Python sidecar bundled inside — see [Packaging](#packaging).
+There are no published releases yet: build the macOS app yourself with
+`npm run dist` (see [Packaging](#packaging)) and open the DMG it leaves in
+`release/`, or run from source (see [Development](#development)).
 
-The LinkML preview can be scoped to the selected element — handy for checking
-how one field renders without scrolling the whole schema:
+## Opening a dictionary
+
+dd-edit opens data dictionaries saved as CSV, LinkML YAML, or dd-json —
+use **Open…** (⌘O) or the buttons on the welcome screen. REDCap data
+dictionary exports open too: they are brought in as an import (the title
+shows, say, `study.csv (imported)`), and saving writes a standard data
+dictionary, since REDCap's own format can't express everything the
+specification can.
+
+## Editing in the grid
+
+The grid works the way a spreadsheet does. Click a cell to edit it in place,
+copy and paste ranges to and from Excel or Google Sheets, drag the fill
+handle to repeat a value down a column, and drag rows to reorder them. Add an
+element with the row at the bottom of the grid; undo and redo work for every
+change (⌘Z / ⇧⌘Z).
+
+The grid also lends a hand where it can. When something has an easy fix — a
+unit written informally where a standard code exists, or an enumeration whose
+values are all integers while the datatype says `string` — an amber
+suggestion appears right in the cell; click it to apply the fix (datatype
+changes ask for confirmation first).
+
+## The element inspector
+
+Select a row and the panel on the right shows everything about that element.
+Highlights:
+
+- **Precondition** — write conditions like `consented = "1" and age >= 18`;
+  the field suggests what can come next as you type and shows a plain
+  reading of the condition underneath.
+- **Unit** — type a unit and the standard [UCUM](https://ucum.org) code is
+  suggested (for example "years" → `a`); free text remains allowed.
+- **Enumerations and missing-value codes** — edit each permissible value
+  with its label, optionally linked to an ontology term.
+- **Ontology terms** — paste an IRI or an OBO id such as `MONDO:0004979` and
+  the term's human-readable name appears, with a link out to browse it.
+- **Description** — written in Markdown, shown formatted.
+
+## Previews
+
+The CSV, LinkML, and HTML tabs show the dictionary exactly as it will be
+written out — as a table, as a LinkML schema, and as a formatted web page —
+and they update as you type. Selecting rows in the grid scopes the LinkML
+preview to just those elements, which is handy for checking how one field
+renders without scrolling the whole schema:
 
 ![The LinkML preview pane showing the generated schema for just the selected data element](docs/screenshot-linkml.png)
 
-Still on the list: in-grid enumeration editing and collapsible section groups.
+## Checking your dictionary
+
+The Problems tab lists everything the specification's validator finds in the
+open dictionary, and each problem highlights its cell in the grid. Line
+numbers match the saved CSV line for line, so a problem reported against the
+file is easy to trace back to a row.
+
+## What's not there yet
+
+Enumerations are edited in the inspector (not yet directly in the grid), and
+sections can't yet be collapsed into groups. The [design](DESIGN.md) has the
+full roadmap.
 
 ## Development
 
@@ -97,6 +137,8 @@ dd-edit stands on:
 - [LinkML](https://linkml.io) — the schema language the toolkit renders
   dictionaries into.
 - [marked](https://marked.js.org) — Markdown rendering for descriptions.
-- [EMBL-EBI OLS4](https://www.ebi.ac.uk/ols4/) — ontology term label lookups.
+- [EMBL-EBI OLS4](https://www.ebi.ac.uk/ols4/) and
+  [BioPortal](https://bioportal.bioontology.org) — ontology term label
+  lookups.
 - [UCUM](https://ucum.org) — the unit vocabulary behind the Unit field's
   assistance.
