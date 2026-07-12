@@ -5,7 +5,7 @@ A desktop app for viewing and editing
 built around the efficiency of a spreadsheet — rows are data elements, columns
 are the specification's fields — with live previews of the CSV and
 [LinkML](https://linkml.io) YAML serializations and the rendered HTML page.
-REDCap data dictionary exports import directly.
+[REDCap](https://redcap.uits.iu.edu) data dictionary exports import directly.
 
 ![dd-edit editing a data dictionary: the spreadsheet grid with section colors, datatype pills, and enumerations on the left; the element inspector with precondition, unit, and ontology-term fields on the right](docs/screenshot.png)
 
