@@ -28,11 +28,15 @@ place — the app opens, edits, validates, and saves real dictionaries:
   panel; the CSV's line numbers map 1:1 onto grid rows.
 - **REDCap import**, and open/save across all three toolkit formats
   (CSV / LinkML YAML / dd-json).
+- **Installers** (milestone 5): `npm run dist` produces a macOS app with the
+  Python sidecar bundled inside — see [Packaging](#packaging).
 
-Not yet done (milestone 5): installer packaging — a PyInstaller build of the
-sidecar plus electron-builder — so the app currently runs from `npm run dev`.
-In-grid enumeration editing and collapsible section groups are also still on
-the list.
+The LinkML preview can be scoped to the selected element — handy for checking
+how one field renders without scrolling the whole schema:
+
+![The LinkML preview pane showing the generated schema for just the selected data element](docs/screenshot-linkml.png)
+
+Still on the list: in-grid enumeration editing and collapsible section groups.
 
 ## Architecture in one paragraph
 
@@ -62,6 +66,21 @@ npm run dev
 
 Sidecar tests: `cd sidecar && .venv/bin/pytest`. Renderer tests: `npm test`.
 Type checks: `npm run typecheck`. CI runs all three on every push.
+
+## Packaging
+
+```sh
+# one-time: PyInstaller into the sidecar venv
+cd sidecar && .venv/bin/pip install -e ".[build]" && cd ..
+
+npm run dist
+```
+
+`npm run dist` builds the app bundles, the PyInstaller one-dir sidecar
+(`sidecar/build-binary.sh`), and unsigned macOS installers (DMG + zip) in
+`release/`. The sidecar ships inside the app as an extra resource and is
+spawned from there when the app is packaged; builds are unsigned for now, so
+the first launch needs right-click → Open to satisfy Gatekeeper.
 
 ## License
 
