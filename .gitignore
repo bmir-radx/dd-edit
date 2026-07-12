@@ -12,3 +12,7 @@ __pycache__/
 # OS / editors
 .DS_Store
 .idea/
+
+# Packaging
+release/
+sidecar/build/

@@ -43,8 +43,12 @@ function sidecarCommand(): { cmd: string; args: string[] } {
     const [cmd, ...args] = override.split(' ')
     return { cmd, args }
   }
+  // Packaged: the PyInstaller one-dir bundle shipped in extraResources
+  // (see electron-builder.yml); its executable takes just --port.
+  if (app.isPackaged) {
+    return { cmd: path.join(process.resourcesPath, 'sidecar', 'dd-edit-sidecar'), args: [] }
+  }
   // Dev: prefer the sidecar's own venv; fall back to whatever python3 is around.
-  // (Packaged builds will point this at the bundled PyInstaller binary instead.)
   const venvPython = path.join(app.getAppPath(), 'sidecar', '.venv', 'bin', 'python')
   const cmd = existsSync(venvPython) ? venvPython : 'python3'
   return { cmd, args: ['-m', 'dd_edit_sidecar'] }
@@ -73,7 +77,10 @@ async function startSidecar(): Promise<void> {
   const { cmd, args } = sidecarCommand()
   sidecar = spawn(cmd, [...args, '--port', String(port)], {
     env: { ...process.env, DD_EDIT_TOKEN: token },
-    cwd: app.getAppPath(),
+    // cwd must be a real directory. In a packaged app getAppPath() points
+    // INSIDE app.asar — a file — and spawn fails with ENOTDIR; use the
+    // bundled binary's own directory there instead.
+    cwd: app.isPackaged ? path.dirname(cmd) : app.getAppPath(),
     stdio: ['ignore', 'inherit', 'inherit'],
   })
   sidecar.on('exit', (code) => {

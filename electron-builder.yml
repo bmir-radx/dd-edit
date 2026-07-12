@@ -1,0 +1,25 @@
+# Installer packaging (DESIGN.md milestone 5): the electron-vite output plus
+# the PyInstaller one-dir sidecar as an extra resource. Build with `npm run
+# dist` (which builds both first).
+appId: org.bmir.dd-edit
+productName: dd-edit
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+extraResources:
+  # The sidecar bundle lands at <app>/Contents/Resources/sidecar/ with the
+  # executable at sidecar/dd-edit-sidecar — matching sidecarCommand() in
+  # src/main/index.ts for the packaged case.
+  - from: sidecar/dist/dd-edit-sidecar
+    to: sidecar
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+    - target: zip
+  # Unsigned for now: distribution inside the group. First launch needs
+  # right-click > Open (Gatekeeper); signing/notarization can come later.
+  identity: null
+npmRebuild: false

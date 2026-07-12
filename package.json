@@ -11,7 +11,9 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "gen:types": "node scripts/gen-types.mjs"
+    "gen:types": "node scripts/gen-types.mjs",
+    "build:sidecar": "sidecar/build-binary.sh",
+    "dist": "npm run build && npm run build:sidecar && electron-builder"
   },
   "devDependencies": {
     "@types/marked": "^4.3.2",
@@ -20,6 +22,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "json-schema-to-typescript": "^15.0.4",
     "playwright-core": "^1.61.1",
