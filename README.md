@@ -7,9 +7,30 @@ are the specification's fields — with live previews of the CSV and
 [LinkML](https://linkml.io) YAML serializations and the rendered HTML page.
 REDCap data dictionary exports import directly.
 
-**Status: early development.** The [design](DESIGN.md) and the milestone-1
-skeleton (Electron shell + Python sidecar handshake) are in place; the editor
-itself is not built yet.
+**Status: working editor.** Milestones 1–4 of the [design](DESIGN.md) are in
+place — the app opens, edits, validates, and saves real dictionaries:
+
+- **Spreadsheet grid** ([Glide Data Grid](https://github.com/glideapps/glide-data-grid)):
+  inline editing, fill handle, range selection, TSV copy/paste that
+  interoperates with Excel/Sheets, row add/delete/drag-reorder, and undo/redo
+  over the document model.
+- **Element inspector**: structured editing of every field — a precondition
+  editor with grammar type-ahead and a live read-back of the parsed
+  expression, datatype/cardinality pickers, UCUM unit assistance,
+  enumeration / missing-value / ontology-term editors (terms resolve their
+  human-readable labels via OLS), and a Markdown description editor with
+  preview.
+- **Live previews**: the CSV (rendered as a table), the LinkML YAML, and the
+  `dd-printer` HTML page, debounced as you type.
+- **Validation**: `dd-validate` findings appear as cell tints and a problems
+  panel; the CSV's line numbers map 1:1 onto grid rows.
+- **REDCap import**, and open/save across all three toolkit formats
+  (CSV / LinkML YAML / dd-json).
+
+Not yet done (milestone 5): installer packaging — a PyInstaller build of the
+sidecar plus electron-builder — so the app currently runs from `npm run dev`.
+In-grid enumeration editing and collapsible section groups are also still on
+the list.
 
 ## Architecture in one paragraph
 
@@ -37,7 +58,8 @@ npm install
 npm run dev
 ```
 
-Sidecar tests: `cd sidecar && .venv/bin/pytest`. Type checks: `npm run typecheck`.
+Sidecar tests: `cd sidecar && .venv/bin/pytest`. Renderer tests: `npm test`.
+Type checks: `npm run typecheck`. CI runs all three on every push.
 
 ## License
 
