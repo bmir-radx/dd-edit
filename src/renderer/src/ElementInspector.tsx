@@ -16,7 +16,7 @@ marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea, CommitWrapInput, StringListEditor } from './inputs'
-import { LINKML_NATIVE, isNumericDatatype, needsIntegerDatatype, preferredDatatype } from './datatypes'
+import { LINKML_NATIVE, needsIntegerDatatype, preferredDatatype, wantsUnit } from './datatypes'
 import { idNeedsCleanup, sanitizeId } from './ids'
 import { pillColors } from './pillColors'
 import { PreconditionField } from './PreconditionField'
@@ -273,9 +273,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             placeholder="UCUM unit, e.g. mg/dL"
           />
           <UnitAssist value={text('unit')} onUse={commitNullable('unit')} />
-          {text('unit') === '' &&
-          (element.enumeration ?? []).length === 0 &&
-          isNumericDatatype(element.datatype) ? (
+          {wantsUnit(element) ? (
             // Deliberately quiet (not amber): counts and scores are
             // legitimately unitless, so this is a nudge, not a problem.
             <div className="soft-hint">

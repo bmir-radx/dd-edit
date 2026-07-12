@@ -746,6 +746,7 @@ button.toggled {
 .problem .badge svg { margin-right: 0; }
 .problem.error .badge { color: var(--danger); }
 .problem.warning .badge { color: #b7791f; }
+.problem.info .badge { color: var(--text-dim); }
 .problem .text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .problem .msg { white-space: normal; }
 .problem .where { font-size: 11px; color: var(--text-dim); }

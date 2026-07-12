@@ -33,7 +33,7 @@ import { deleteElements, emptyElement, insertElement, moveElement, setField } fr
 import { useEditor } from './model/store'
 import { pillColors } from './pillColors'
 import { findingRow, type Finding, type FindingLevel } from './sidecar'
-import { needsIntegerDatatype } from './datatypes'
+import { needsIntegerDatatype, wantsUnit } from './datatypes'
 import { idNeedsCleanup } from './ids'
 import { ucumSuggestion, ucumUnit } from './ucum'
 import type { DataElement, EnumItem } from './types/document'
@@ -359,7 +359,6 @@ const COLUMNS: ColumnSpec[] = [
   { key: 'required', title: 'Required', width: 85, kind: 'boolean' },
   { key: 'unit', title: 'Unit', width: 90, kind: 'text', nullable: true },
   { key: 'enumeration', title: 'Enumeration', width: 230, kind: 'bubble' },
-  { key: 'missing_value_codes', title: 'Missing values', width: 150, kind: 'bubble' },
   { key: 'pattern', title: 'Pattern', width: 130, kind: 'text', nullable: true },
   { key: 'precondition', title: 'Precondition', width: 160, kind: 'text', nullable: true },
   { key: 'terms', title: 'Terms', width: 160, kind: 'bubble' },
@@ -369,6 +368,9 @@ const COLUMNS: ColumnSpec[] = [
   { key: 'notes', title: 'Notes', width: 200, kind: 'text', nullable: true },
   { key: 'provenance', title: 'Provenance', width: 180, kind: 'text', nullable: true },
   { key: 'see_also', title: 'See also', width: 180, kind: 'text', nullable: true },
+  // Last by default: the standard codes repeat on almost every element, so
+  // they'd otherwise push the varied, informative columns off screen.
+  { key: 'missing_value_codes', title: 'Missing values', width: 150, kind: 'bubble' },
 ]
 
 /** Column keys that can wrap: text-bearing columns and pill lists. */
@@ -392,7 +394,15 @@ function loadColOrder(): string[] {
         )
       : []
     // Columns added to the spec since the order was saved append at the end.
-    return [...valid, ...MOVABLE_DEFAULT.filter((k) => !valid.includes(k))]
+    let order = [...valid, ...MOVABLE_DEFAULT.filter((k) => !valid.includes(k))]
+    // One-time migration (2026-07): Missing values moved to the end of the
+    // default order. Saved orders get the same nudge once; drags after that
+    // are the user's and stick.
+    if (localStorage.getItem('dd-edit.colOrder.mvLast') === null) {
+      order = [...order.filter((k) => k !== 'missing_value_codes'), 'missing_value_codes']
+      localStorage.setItem('dd-edit.colOrder.mvLast', '1')
+    }
+    return order
   } catch {
     return MOVABLE_DEFAULT
   }
@@ -920,6 +930,29 @@ export function GridView({
         }
       }
 
+      // Empty unit cells of numeric, non-enumerated fields carry a quiet gray
+      // ⓘ (hover explains); the inspector's Unit field says the same thing.
+      if (key === 'unit' && cell.kind === GridCellKind.Text && cell.displayData === '') {
+        const element = doc.elements[args.row]
+        if (element !== undefined && wantsUnit(element)) {
+          const cx = rect.x + UNIT_PAD_X + 6
+          const cy = firstLineCenterY(rect.y, rect.height)
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(cx, cy, 6, 0, Math.PI * 2)
+          ctx.lineWidth = 1.25
+          ctx.strokeStyle = '#9aa2ab'
+          ctx.stroke()
+          ctx.fillStyle = '#9aa2ab'
+          ctx.font = `600 9px ${FONT_FAMILY}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('i', cx, cy + 0.5)
+          ctx.restore()
+          return
+        }
+      }
+
       // Ids that schema renderings would rename (spaces / special characters)
       // get a small amber warning triangle at the cell's right edge; the
       // inspector's Id field explains and offers the sanitized form.
@@ -1162,7 +1195,8 @@ export function GridView({
         ) {
           next = { col, row }
         }
-        // Cell-scoped findings on their cell; row-level findings (no column)
+        // Cell-scoped findings on their cell (the unit ⓘ's nudge arrives as a
+        // synthesized INFO finding from App); row-level findings (no column)
         // surface when hovering the row's first (Section) cell.
         const messages =
           col === 0

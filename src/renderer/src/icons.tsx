@@ -91,3 +91,11 @@ export const IconWarning = () => (
     <line x1="12" y1="17" x2="12.01" y2="17" />
   </Icon>
 )
+
+export const IconInfo = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </Icon>
+)

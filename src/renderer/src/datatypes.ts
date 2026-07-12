@@ -60,6 +60,27 @@ export function isNumericDatatype(datatype: string): boolean {
 }
 
 /**
+ * True for a numeric, non-enumerated field with no unit — the shared
+ * predicate behind the inspector's quiet unit nudge and the grid's gray ⓘ.
+ * A nudge, not a problem: counts and scores are legitimately unitless.
+ */
+export function wantsUnit(element: {
+  datatype: string
+  unit?: string | null
+  enumeration?: readonly unknown[] | null
+}): boolean {
+  return (
+    (element.unit ?? '').trim() === '' &&
+    (element.enumeration ?? []).length === 0 &&
+    isNumericDatatype(element.datatype)
+  )
+}
+
+/** The nudge's wording, shared by the inspector hint and the grid tooltip. */
+export const UNIT_NUDGE =
+  'Numeric field with no unit — consider a UCUM unit, or 1 (dimensionless) for counts and scores.'
+
+/**
  * True when every enumeration value parses as an integer but the element's
  * datatype isn't integer-flavored — the "should this be integer?" fix that
  * both the inspector hint and the grid's datatype-cell pill offer.

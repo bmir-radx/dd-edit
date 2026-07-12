@@ -3,7 +3,7 @@
  * offending row. File-level findings (no row) sit at the top.
  */
 import { useMemo } from 'react'
-import { IconError, IconWarning } from './icons'
+import { IconError, IconInfo, IconWarning } from './icons'
 import { useEditor } from './model/store'
 import { findingRow, type Finding } from './sidecar'
 
@@ -51,7 +51,7 @@ export function ProblemsPanel({
             title={f.check}
           >
             <span className="badge">
-              {f.level === 'ERROR' ? <IconError /> : <IconWarning />}
+              {f.level === 'ERROR' ? <IconError /> : f.level === 'WARNING' ? <IconWarning /> : <IconInfo />}
             </span>
             <span className="text">
               <span className="msg">{f.message}</span>

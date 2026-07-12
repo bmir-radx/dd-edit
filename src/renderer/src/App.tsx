@@ -6,7 +6,8 @@
  * store.
  */
 import type { DataEditorRef } from '@glideapps/glide-data-grid'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { UNIT_NUDGE, wantsUnit } from './datatypes'
 import { ElementInspector } from './ElementInspector'
 import { GridView, WRAPPABLE_KEYS } from './GridView'
 import {
@@ -273,8 +274,28 @@ export function App() {
     return () => clearTimeout(timer)
   }, [doc])
 
-  const errorCount = findings.filter((f) => f.level === 'ERROR').length
-  const warningCount = findings.filter((f) => f.level === 'WARNING').length
+  // Client-side nudges join the validator's findings as INFO entries, so the
+  // problems list, cell tooltips, and jump-to-cell all flow one pipeline.
+  const allFindings = useMemo<Finding[]>(() => {
+    const nudges = doc.elements.flatMap((e, i) =>
+      wantsUnit(e)
+        ? [
+            {
+              level: 'INFO' as const,
+              check: 'missing-unit',
+              message: UNIT_NUDGE,
+              line: i + 2, // findingRow maps CSV line i+2 back to row i
+              column: 'Unit',
+              value: null,
+            },
+          ]
+        : [],
+    )
+    return nudges.length > 0 ? [...findings, ...nudges] : findings
+  }, [findings, doc])
+
+  const errorCount = allFindings.filter((f) => f.level === 'ERROR').length
+  const warningCount = allFindings.filter((f) => f.level === 'WARNING').length
 
   // ------------------------------------------------------------ startup
 
@@ -409,7 +430,7 @@ export function App() {
                 onSelectedRows={setSelectedRows}
                 showSearch={showSearch}
                 onSearchClose={() => setShowSearch(false)}
-                findings={findings}
+                findings={allFindings}
                 wrappedCols={wrappedCols}
                 onHeaderMenu={(key, pos) => setHeaderMenu({ key, ...pos })}
                 jumpTarget={jumpTarget}
@@ -429,14 +450,14 @@ export function App() {
                   {tab('html', 'HTML')}
                   {tab(
                     'problems',
-                    findings.length > 0 ? `Problems (${findings.length})` : 'Problems',
+                    allFindings.length > 0 ? `Problems (${allFindings.length})` : 'Problems',
                   )}
                 </div>
                 <div className="body">
                   {panelTab === 'element' ? (
                     <ElementInspector row={cursorRow} datatypes={datatypes} />
                   ) : panelTab === 'problems' ? (
-                    <ProblemsPanel findings={findings} onJump={jumpToRow} />
+                    <ProblemsPanel findings={allFindings} onJump={jumpToRow} />
                   ) : (
                     <PreviewPane
                       format={panelTab}
