@@ -381,7 +381,11 @@ export function suggest(
   const before = text.slice(0, cursor)
 
   // The partial token under the cursor: an ident-ish word or an open string.
-  const partialString = /"[^"]*$/.exec(before)
+  // A string is open only when the quotes before the cursor don't pair up —
+  // /"[^"]*$/ alone would also match a CLOSED string's closing quote plus
+  // whatever follows it, swallowing the real last token.
+  const insideString = ((before.match(/"/g) ?? []).length & 1) === 1
+  const partialString = insideString ? /"[^"]*$/.exec(before) : null
   const partialWord = partialString ? null : /[A-Za-z0-9_.-]*$/.exec(before)
   const partial = partialString?.[0] ?? partialWord?.[0] ?? ''
   const from = cursor - partial.length
