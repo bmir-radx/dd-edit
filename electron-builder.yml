@@ -22,4 +22,11 @@ mac:
   # Unsigned for now: distribution inside the group. First launch needs
   # right-click > Open (Gatekeeper); signing/notarization can come later.
   identity: null
+win:
+  # NSIS installer, unsigned for now: SmartScreen will warn on first run
+  # ("More info" > "Run anyway"). The Windows sidecar binary must be built
+  # ON Windows (PyInstaller does not cross-compile) — see the Release
+  # Installers workflow, which builds both platforms.
+  target:
+    - target: nsis
 npmRebuild: false

@@ -1,0 +1,81 @@
+name: Release Installers
+
+# Build installers for macOS and Windows. PyInstaller does not cross-compile,
+# so each platform's sidecar binary is built on that platform's runner. Both
+# sidecar binaries get a /health smoke test before being packaged. Installers
+# are uploaded as workflow artifacts (unsigned — macOS needs right-click >
+# Open, Windows needs SmartScreen's "Run anyway").
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            builder_args: --mac
+          - os: windows-latest
+            builder_args: --win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create sidecar venv with build extra
+        shell: bash
+        working-directory: sidecar
+        run: |
+          python -m venv .venv
+          if [ -e .venv/bin/pip ]; then PIP=.venv/bin/pip; else PIP=.venv/Scripts/pip; fi
+          "$PIP" install -e ".[build]"
+
+      - name: Build app bundles
+        run: npm run build
+
+      - name: Build sidecar binary
+        run: npm run build:sidecar
+
+      - name: Smoke test sidecar binary
+        shell: bash
+        run: |
+          exe=sidecar/dist/dd-edit-sidecar/dd-edit-sidecar
+          [ -e "$exe" ] || exe="$exe.exe"
+          DD_EDIT_TOKEN=smoke "$exe" --port 8756 &
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8756/health; then ok=1; break; fi
+            sleep 1
+          done
+          echo
+          [ -n "$ok" ] || { echo "sidecar binary never became healthy"; exit 1; }
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.builder_args }} --publish never
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: dd-edit-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+          if-no-files-found: error

@@ -46,7 +46,8 @@ function sidecarCommand(): { cmd: string; args: string[] } {
   // Packaged: the PyInstaller one-dir bundle shipped in extraResources
   // (see electron-builder.yml); its executable takes just --port.
   if (app.isPackaged) {
-    return { cmd: path.join(process.resourcesPath, 'sidecar', 'dd-edit-sidecar'), args: [] }
+    const exe = process.platform === 'win32' ? 'dd-edit-sidecar.exe' : 'dd-edit-sidecar'
+    return { cmd: path.join(process.resourcesPath, 'sidecar', exe), args: [] }
   }
   // Dev: prefer the sidecar's own venv; fall back to whatever python3 is around.
   const venvPython = path.join(app.getAppPath(), 'sidecar', '.venv', 'bin', 'python')
