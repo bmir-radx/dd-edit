@@ -16,7 +16,8 @@ marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea, CommitWrapInput, StringListEditor } from './inputs'
-import { LINKML_NATIVE, needsIntegerDatatype, preferredDatatype } from './datatypes'
+import { LINKML_NATIVE, isNumericDatatype, needsIntegerDatatype, preferredDatatype } from './datatypes'
+import { idNeedsCleanup, sanitizeId } from './ids'
 import { pillColors } from './pillColors'
 import { PreconditionField } from './PreconditionField'
 import { sidecar } from './sidecar'
@@ -117,6 +118,18 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         <label className="field">
           <span>Id (variable name) <Dot k="id" /></span>
           <CommitInput value={element.id} onCommit={commitText('id')} />
+          {idNeedsCleanup(element.id) ? (
+            <div className="fix-hint">
+              Schema renderings rename this id to <code>{sanitizeId(element.id)}</code>, and
+              preconditions can't reference it as written.
+              <button
+                type="button"
+                onClick={() => apply((d) => setField(d, index, 'id', sanitizeId(element.id)))}
+              >
+                Use {sanitizeId(element.id)}
+              </button>
+            </div>
+          ) : null}
         </label>
         <label className="field">
           <span>Label <Dot k="label" /></span>
@@ -260,6 +273,16 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             placeholder="UCUM unit, e.g. mg/dL"
           />
           <UnitAssist value={text('unit')} onUse={commitNullable('unit')} />
+          {text('unit') === '' &&
+          (element.enumeration ?? []).length === 0 &&
+          isNumericDatatype(element.datatype) ? (
+            // Deliberately quiet (not amber): counts and scores are
+            // legitimately unitless, so this is a nudge, not a problem.
+            <div className="soft-hint">
+              Numeric field with no unit — consider a UCUM unit, or <code>1</code>{' '}
+              (dimensionless) for counts and scores.
+            </div>
+          ) : null}
         </label>
         <label className="field">
           <span>Pattern (regex) <Dot k="pattern" /></span>

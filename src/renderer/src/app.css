@@ -610,16 +610,32 @@ button.toggled {
 }
 .pc-paren { color: #9aa2ab; }
 
+/* Findings tooltip: hover a tinted cell, read why. Fixed-positioned below
+   the cell (GDG bounds are viewport coords), never intercepts the mouse. */
+.cell-tooltip {
+  position: fixed;
+  z-index: 90;
+  max-width: 360px;
+  padding: 6px 10px;
+  background: #1f2328;
+  color: #f6f8fa;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.cell-tooltip > div + div { margin-top: 3px; }
+
 /* Actionable fix suggestions (unit → UCUM, datatype → native, enum →
    integer): an amber note with the message left and the action button
    pinned right, vertically centered. The message lives in one .msg span,
    so its text and code chips keep normal inline flow and wrap as a
    sentence; only the button is a separate flex item. */
 .fix-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  /* Inline flow, not flex: the note is a SENTENCE (text, code chip, button
+     in reading order). Flex + space-between shreds it into ragged columns. */
+  display: block;
   margin: 4px 0 12px;
   padding: 8px 12px;
   background: #fff8e6;
@@ -627,7 +643,7 @@ button.toggled {
   border-radius: 7px;
   font-size: 12px;
   font-weight: 400;
-  line-height: 1.6;
+  line-height: 1.7;
   color: #7a5c10;
 }
 .fix-hint .msg { flex: 1; min-width: 0; }
@@ -651,6 +667,16 @@ button.toggled {
   cursor: pointer;
 }
 .fix-hint button:hover { background: #fdf3d0; }
+
+/* Quiet nudges: informational, no action required, never amber. */
+.soft-hint { margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--text-dim); }
+.soft-hint code {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 10.5px;
+  background: #eef1f4;
+  padding: 0 4px;
+  border-radius: 4px;
+}
 
 /* UCUM assistance under the Unit field. */
 .unit-hint {

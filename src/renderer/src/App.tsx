@@ -78,7 +78,6 @@ export function App() {
     const stored = Number(localStorage.getItem('dd-edit.panelWidth'))
     return stored >= 280 && stored <= 800 ? stored : 400
   })
-  const gridRef = useRef<DataEditorRef | null>(null)
 
   useEffect(() => {
     localStorage.setItem('dd-edit.panelWidth', String(panelWidth))
@@ -206,8 +205,15 @@ export function App() {
     setPanelTab('element')
   }, [apply, cursorRow])
 
-  const jumpToRow = useCallback((row: number) => {
-    gridRef.current?.scrollTo(0, row, 'both', 0, 0, { vAlign: 'center' })
+  // Navigation into the grid (problems panel, section jumper): GridView owns
+  // the scroll-and-select, since only it knows the display column order.
+  const [jumpTarget, setJumpTarget] = useState<{
+    row: number
+    column: string | null
+    nonce: number
+  } | null>(null)
+  const jumpToRow = useCallback((row: number, column: string | null = null) => {
+    setJumpTarget((prev) => ({ row, column, nonce: (prev?.nonce ?? 0) + 1 }))
     setCursorRow(row)
   }, [])
 
@@ -397,7 +403,7 @@ export function App() {
                 findings={findings}
                 wrappedCols={wrappedCols}
                 onHeaderMenu={(key, pos) => setHeaderMenu({ key, ...pos })}
-                gridRef={gridRef}
+                jumpTarget={jumpTarget}
               />
             </div>
             {panelOpen ? (

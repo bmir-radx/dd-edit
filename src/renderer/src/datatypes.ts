@@ -51,6 +51,14 @@ export function preferredDatatype(datatype: string): string | null {
   return PREFERRED_DATATYPE[datatype] ?? 'string'
 }
 
+/** Numeric datatypes (integer + real families), for the missing-unit nudge. */
+export function isNumericDatatype(datatype: string): boolean {
+  return (
+    ['integer', 'decimal', 'float', 'double'].includes(datatype) ||
+    PREFERRED_DATATYPE[datatype] === 'integer'
+  )
+}
+
 /**
  * True when every enumeration value parses as an integer but the element's
  * datatype isn't integer-flavored — the "should this be integer?" fix that

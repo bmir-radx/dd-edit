@@ -14,7 +14,8 @@ export function ProblemsPanel({
   onJump,
 }: {
   findings: Finding[]
-  onJump: (row: number) => void
+  /** Jump to the offending row — and cell, when the finding names a column. */
+  onJump: (row: number, column: string | null) => void
 }) {
   const doc = useEditor((s) => s.doc)
 
@@ -45,7 +46,7 @@ export function ProblemsPanel({
           <button
             key={i}
             className={`problem ${f.level.toLowerCase()}`}
-            onClick={() => row !== null && onJump(row)}
+            onClick={() => row !== null && onJump(row, f.column)}
             disabled={row === null}
             title={f.check}
           >

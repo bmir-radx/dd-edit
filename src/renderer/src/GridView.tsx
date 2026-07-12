@@ -28,12 +28,13 @@ import {
   type Item,
 } from '@glideapps/glide-data-grid'
 import '@glideapps/glide-data-grid/dist/index.css'
-import { useCallback, useEffect, useMemo, useState, type Ref } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { deleteElements, emptyElement, insertElement, moveElement, setField } from './model/document'
 import { useEditor } from './model/store'
 import { pillColors } from './pillColors'
 import { findingRow, type Finding, type FindingLevel } from './sidecar'
 import { needsIntegerDatatype } from './datatypes'
+import { idNeedsCleanup } from './ids'
 import { ucumSuggestion, ucumUnit } from './ucum'
 import type { DataElement, EnumItem } from './types/document'
 
@@ -66,6 +67,7 @@ const BASE_FONT = `13px ${FONT_FAMILY}`
 const LINE_HEIGHT = 17
 const MIN_ROW_HEIGHT = 34
 const MAX_ROW_HEIGHT = 400
+const GDG_HEADER_HEIGHT = 36 // GDG's default headerHeight (we don't override it)
 const CELL_PAD_TOP = 9 // top inset of a cell's first line in a tall/wrapped row
 
 /**
@@ -291,24 +293,35 @@ const CELL_TINT: Record<FindingLevel, string | undefined> = {
   WARNING: '#faeeca',
   INFO: undefined,
 }
-const MODIFIED_BLUE = '#2563eb'
 
 function worse(a: FindingLevel | undefined, b: FindingLevel): FindingLevel {
   return a === 'ERROR' || b === 'ERROR' ? 'ERROR' : a === 'WARNING' || b === 'WARNING' ? 'WARNING' : b
 }
 
 /**
- * Pastel per section, assigned by order of first appearance stepping the hue
- * wheel by the golden angle — consecutive sections land ~137° apart, so
- * neighbors are always clearly distinct (a name hash can collide, and did:
- * "Consent" and "Demographics" hashed to near-identical lavenders).
+ * Pastel per section, assigned by order of first appearance from a curated
+ * cool-hue palette. Curated rather than hue-stepped because color is meaning
+ * here: red and amber are the validation tints, so section tints must never
+ * wander into that band (a golden-angle walk started at hue 0 — pink — and
+ * the first section read as an error).
  */
+const SECTION_TINTS = [
+  'hsl(212 62% 94%)', // blue
+  'hsl(158 52% 92%)', // green
+  'hsl(262 55% 95%)', // violet
+  'hsl(190 60% 92%)', // cyan
+  'hsl(140 45% 92%)', // mint
+  'hsl(232 55% 95%)', // indigo
+  'hsl(175 50% 91%)', // teal
+  'hsl(250 45% 94%)', // periwinkle
+]
+
 function sectionTints(elements: readonly DataElement[]): Map<string, string> {
   const tints = new Map<string, string>()
   for (const element of elements) {
     const name = element.section ?? ''
     if (name === '' || tints.has(name)) continue
-    tints.set(name, `hsl(${Math.round((tints.size * 137.5) % 360)} 60% 94%)`)
+    tints.set(name, SECTION_TINTS[tints.size % SECTION_TINTS.length])
   }
   return tints
 }
@@ -327,16 +340,15 @@ type ScalarKey =
   | 'see_also'
 
 interface ColumnSpec {
-  key: keyof DataElement | '__mod'
+  key: keyof DataElement
   title: string
   width: number
-  kind: 'modified' | 'text' | 'boolean' | 'bubble' | 'markdown'
+  kind: 'text' | 'boolean' | 'bubble' | 'markdown'
   /** Blank input stores null (optional fields) rather than "". */
   nullable?: boolean
 }
 
 const COLUMNS: ColumnSpec[] = [
-  { key: '__mod', title: '', width: 34, kind: 'modified' },
   // Section leads: its pastel band is the grouping gutter, frozen with Id.
   { key: 'section', title: 'Section', width: 130, kind: 'text', nullable: true },
   { key: 'id', title: 'Id', width: 130, kind: 'text' },
@@ -364,11 +376,11 @@ export const WRAPPABLE_KEYS: string[] = COLUMNS.filter(
   (c) => c.kind === 'text' || c.kind === 'markdown' || c.kind === 'bubble',
 ).map((c) => c.key as string)
 
-// The frozen columns (modified dot, Section, Id) keep their place; everything
-// after Id can be drag-reordered. Order and widths are presentation only —
-// serialization always uses the canonical field order — and persist across
-// sessions alongside the wrap setting.
-const FROZEN_COUNT = 3
+// The frozen columns (Section, Id) keep their place; everything after Id can
+// be drag-reordered. Order and widths are presentation only — serialization
+// always uses the canonical field order — and persist across sessions
+// alongside the wrap setting.
+const FROZEN_COUNT = 2
 const MOVABLE_DEFAULT: string[] = COLUMNS.slice(FROZEN_COUNT).map((c) => c.key as string)
 
 function loadColOrder(): string[] {
@@ -509,8 +521,8 @@ export interface GridViewProps {
   wrappedCols: ReadonlySet<string>
   /** A wrappable column's header menu chevron was clicked. */
   onHeaderMenu: (key: string, position: { x: number; y: number }) => void
-  /** For imperative scrolling (problems panel, section jumper). */
-  gridRef?: Ref<DataEditorRef>
+  /** Scroll to (and select) this cell/row whenever the nonce bumps. */
+  jumpTarget?: { row: number; column: string | null; nonce: number } | null
 }
 
 export function GridView({
@@ -521,8 +533,9 @@ export function GridView({
   findings,
   wrappedCols,
   onHeaderMenu,
-  gridRef,
+  jumpTarget,
 }: GridViewProps) {
+  const editorRef = useRef<DataEditorRef | null>(null)
   const doc = useEditor((s) => s.doc)
   const baseline = useEditor((s) => s.baseline)
   const apply = useEditor((s) => s.apply)
@@ -551,21 +564,64 @@ export function GridView({
     ]
   }, [colOrder])
 
-  const baselineRefs = useMemo(() => new Set<DataElement>(baseline.elements), [baseline])
   const sectionColors = useMemo(() => sectionTints(doc.elements), [doc])
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; messages: string[] } | null>(
+    null,
+  )
 
-  // Row -> worst level, and "row|field" -> worst level, for the tints.
-  const { rowLevels, cellLevels } = useMemo(() => {
+  // Problems-panel / section-jumper navigation: scroll to the target, and
+  // when the finding names a column, select that cell so the eye lands on it.
+  // The column header resolves through the user's display order (specs).
+  useEffect(() => {
+    if (jumpTarget == null) return
+    const key = jumpTarget.column !== null ? HEADER_TO_KEY[jumpTarget.column] : undefined
+    const col = key !== undefined ? specs.findIndex((s) => s.key === key) : -1
+    editorRef.current?.scrollTo(
+      Math.max(col, 0),
+      jumpTarget.row,
+      col >= 0 ? 'both' : 'vertical',
+      0,
+      0,
+      { vAlign: 'center' },
+    )
+    if (col >= 0) {
+      setSelection({
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.empty(),
+        current: {
+          cell: [col, jumpTarget.row],
+          range: { x: col, y: jumpTarget.row, width: 1, height: 1 },
+          rangeStack: [],
+        },
+      })
+    }
+    // Re-jumping when specs changes identity would surprise; the nonce is
+    // the one true trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTarget])
+
+  // Row -> worst level (row tint), "row|field" -> worst level + messages
+  // (cell tint + hover tooltip), and row -> messages for findings that have
+  // no column (shown when hovering the row's modified-dot cell).
+  const { rowLevels, cellInfo, rowMessages } = useMemo(() => {
     const rows = new Map<number, FindingLevel>()
-    const cells = new Map<string, FindingLevel>()
+    const cells = new Map<string, { level: FindingLevel; messages: string[] }>()
+    const byRow = new Map<number, string[]>()
     for (const f of findings) {
       const row = findingRow(f)
       if (row === null) continue
       rows.set(row, worse(rows.get(row), f.level))
       const key = f.column ? HEADER_TO_KEY[f.column] : undefined
-      if (key) cells.set(`${row}|${key}`, worse(cells.get(`${row}|${key}`), f.level))
+      if (key) {
+        const slot = cells.get(`${row}|${key}`) ?? { level: f.level, messages: [] }
+        slot.level = worse(slot.level, f.level)
+        slot.messages.push(f.message)
+        cells.set(`${row}|${key}`, slot)
+      } else {
+        byRow.set(row, [...(byRow.get(row) ?? []), f.message])
+      }
     }
-    return { rowLevels: rows, cellLevels: cells }
+    return { rowLevels: rows, cellInfo: cells, rowMessages: byRow }
   }, [findings])
 
   const columns = useMemo<GridColumn[]>(
@@ -579,6 +635,9 @@ export function GridView({
         // hover icon (a triangle that reads as a sort arrow) never appears.
         hasMenu: WRAPPABLE_KEYS.includes(c.key as string),
         menuIcon: 'none',
+        // The append-row hint draws in the column that declares it; the Id
+        // column is the first one wide enough not to crop it.
+        ...(c.key === 'id' ? { trailingRowOptions: { hint: 'add element…' } } : {}),
       })),
     [widths, specs],
   )
@@ -625,19 +684,8 @@ export function GridView({
         return { kind: GridCellKind.Text, data: '', displayData: '', allowOverlay: false }
       }
 
-      if (spec.kind === 'modified') {
-        const modified = !baselineRefs.has(element)
-        return {
-          kind: GridCellKind.Text,
-          data: modified ? 'modified' : '',
-          displayData: modified ? '●' : '',
-          allowOverlay: false,
-          themeOverride: { textDark: MODIFIED_BLUE },
-        }
-      }
-
       const key = spec.key as keyof DataElement
-      const level = cellLevels.get(`${row}|${key}`)
+      const level = cellInfo.get(`${row}|${key}`)?.level
       const tint = level ? CELL_TINT[level] : undefined
 
       if (spec.kind === 'boolean') {
@@ -691,13 +739,13 @@ export function GridView({
           : {}),
       }
     },
-    [doc, cellLevels, baselineRefs, wrappedCols, sectionColors, specs, pillHover],
+    [doc, cellInfo, wrappedCols, sectionColors, specs, pillHover],
   )
 
   const onCellEdited = useCallback(
     ([col, row]: Item, newValue: EditableGridCell) => {
       const spec = specs[col]
-      if (!spec || spec.kind === 'modified' || spec.kind === 'bubble') return
+      if (!spec || spec.kind === 'bubble') return
       if (newValue.kind === GridCellKind.Boolean && spec.key === 'required') {
         apply((d) => setField(d, row, 'required', Boolean(newValue.data)))
         return
@@ -870,6 +918,39 @@ export function GridView({
           ctx.restore()
           return
         }
+      }
+
+      // Ids that schema renderings would rename (spaces / special characters)
+      // get a small amber warning triangle at the cell's right edge; the
+      // inspector's Id field explains and offers the sanitized form.
+      if (
+        key === 'id' &&
+        cell.kind === GridCellKind.Text &&
+        cell.displayData !== '' &&
+        idNeedsCleanup(cell.displayData)
+      ) {
+        drawContent()
+        const cx = rect.x + rect.width - 12
+        const cy = firstLineCenterY(rect.y, rect.height)
+        ctx.save()
+        ctx.beginPath()
+        ctx.moveTo(cx, cy - 5.5)
+        ctx.lineTo(cx + 5, cy + 4)
+        ctx.lineTo(cx - 5, cy + 4)
+        ctx.closePath()
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = 3
+        ctx.strokeStyle = '#f59e0b'
+        ctx.fillStyle = '#f59e0b'
+        ctx.stroke()
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.font = `bold 8px ${FONT_FAMILY}`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('!', cx, cy + 0.5)
+        ctx.restore()
+        return
       }
 
       // Pill lists (enumeration, terms, ...): draw our own flowed pills when
@@ -1067,6 +1148,10 @@ export function GridView({
   const onItemHovered = useCallback(
     (args: GridMouseEventArgs) => {
       let next: { col: number; row: number } | null = null
+      // Findings tooltip: a hovered cell with validation messages shows them
+      // below the cell (fixed positioning; GDG bounds are viewport coords,
+      // same as the header menu). The dot column carries the row-level ones.
+      let tip: { x: number; y: number; messages: string[] } | null = null
       if (args.kind === 'cell') {
         const [col, row] = args.location
         const spec = specs[col]
@@ -1077,10 +1162,37 @@ export function GridView({
         ) {
           next = { col, row }
         }
+        // Cell-scoped findings on their cell; row-level findings (no column)
+        // surface when hovering the row's first (Section) cell.
+        const messages =
+          col === 0
+            ? [
+                ...(cellInfo.get(`${row}|${spec?.key as string}`)?.messages ?? []),
+                ...(rowMessages.get(row) ?? []),
+              ]
+            : cellInfo.get(`${row}|${spec?.key as string}`)?.messages
+        if (messages !== undefined && messages.length > 0) {
+          tip = { x: args.bounds.x, y: args.bounds.y + args.bounds.height + 4, messages }
+        }
       }
       setPillHover((prev) => (prev?.col === next?.col && prev?.row === next?.row ? prev : next))
+      // Content comparison, not identity: the col-0 merge builds a fresh
+      // array per event, and identity churn would redraw on every mousemove.
+      setTooltip((prev) => {
+        if (prev === null && tip === null) return prev
+        if (
+          prev !== null &&
+          tip !== null &&
+          prev.x === tip.x &&
+          prev.y === tip.y &&
+          prev.messages.join('\n') === tip.messages.join('\n')
+        ) {
+          return prev
+        }
+        return tip
+      })
     },
-    [specs, doc],
+    [specs, doc, cellInfo, rowMessages],
   )
 
   // Drag-reorder for the columns after Id (the frozen prefix stays put); a
@@ -1120,9 +1232,22 @@ export function GridView({
     [wrappedCols],
   )
 
+  // GDG rules grid lines over its whole viewport, existing rows or not — so
+  // cap the editor's height at its content (header + rows + append row) and
+  // let the host's plain background show below. min() keeps full-viewport
+  // behavior (internal scrolling) whenever the content is taller.
+  const contentHeight =
+    GDG_HEADER_HEIGHT +
+    (rowHeights !== null
+      ? rowHeights.reduce((a, b) => a + b, 0)
+      : doc.elements.length * MIN_ROW_HEIGHT) +
+    MIN_ROW_HEIGHT + // the sticky "add element…" append row
+    2
+
   return (
+    <div style={{ height: `min(100%, ${contentHeight}px)` }}>
     <DataEditor
-      ref={gridRef}
+      ref={editorRef}
       columns={columns}
       rows={doc.elements.length}
       getCellContent={getCellContent}
@@ -1143,10 +1268,10 @@ export function GridView({
       showSearch={showSearch}
       onSearchClose={onSearchClose}
       rowMarkers="both"
-      freezeColumns={3}
+      freezeColumns={2}
       getCellsForSelection={true}
       onPaste={true}
-      trailingRowOptions={{ sticky: true, tint: true, hint: 'add element…' }}
+      trailingRowOptions={{ sticky: true, tint: true }}
       width="100%"
       height="100%"
       rowHeight={
@@ -1171,5 +1296,13 @@ export function GridView({
         return tint ? { bgCell: tint } : undefined
       }}
     />
+    {tooltip !== null ? (
+      <div className="cell-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+        {tooltip.messages.map((m, i) => (
+          <div key={i}>{m}</div>
+        ))}
+      </div>
+    ) : null}
+    </div>
   )
 }
