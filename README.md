@@ -7,6 +7,8 @@ are the specification's fields — with live previews of the CSV and
 [LinkML](https://linkml.io) YAML serializations and the rendered HTML page.
 REDCap data dictionary exports import directly.
 
+![dd-edit editing a data dictionary: the spreadsheet grid with section colors, datatype pills, and enumerations on the left; the element inspector with precondition, unit, and ontology-term fields on the right](docs/screenshot.png)
+
 **Status: working editor.** Milestones 1–4 of the [design](DESIGN.md) are in
 place — the app opens, edits, validates, and saves real dictionaries:
 
