@@ -12,11 +12,12 @@ directly.
 
 ## Getting the app
 
-There are no published releases yet. Installers — a DMG for macOS, an NSIS
-installer for Windows, an AppImage for Linux — can be built with
-`npm run dist` (see [Packaging](#packaging)) or downloaded as artifacts of
-the **Release Installers** workflow on the repository's Actions tab.
-Alternatively, run from source (see [Development](#development)).
+Installers — a DMG for macOS, an NSIS installer for Windows, an AppImage for
+Linux — are on the
+[Releases page](https://github.com/bmir-radx/dd-edit/releases). They are
+unsigned for now; see [Packaging](#packaging) for the first-launch steps each
+platform requires. Installers can also be built locally with `npm run dist`,
+or the app can be run from source (see [Development](#development)).
 
 ## Opening a dictionary
 
@@ -149,8 +150,10 @@ you are on — DMG + zip on macOS, an NSIS installer on Windows, an AppImage
 on Linux. The sidecar ships inside the app as an extra resource and is
 spawned from there when the app is packaged. PyInstaller does not
 cross-compile, so each platform's installer must be built on that platform;
-the **Release Installers** GitHub Actions workflow (run it from the Actions
-tab) builds all three and uploads them as artifacts.
+the **Release Installers** GitHub Actions workflow builds all three.
+Run manually from the Actions tab it uploads them as workflow artifacts;
+pushing a tag `vX.Y.Z` (which must match `package.json`'s version) runs the
+same build and publishes the installers as a GitHub release.
 
 Builds are unsigned for now: the first launch needs right-click → Open on
 macOS (Gatekeeper), or "More info" → "Run anyway" on Windows (SmartScreen).

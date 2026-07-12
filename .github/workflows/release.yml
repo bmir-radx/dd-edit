@@ -1,13 +1,25 @@
 name: Release Installers
 
-# Build installers for macOS and Windows. PyInstaller does not cross-compile,
-# so each platform's sidecar binary is built on that platform's runner. Both
-# sidecar binaries get a /health smoke test before being packaged. Installers
-# are uploaded as workflow artifacts (unsigned — macOS needs right-click >
-# Open, Windows needs SmartScreen's "Run anyway").
+# Build installers for macOS, Windows, and Linux. PyInstaller does not
+# cross-compile, so each platform's sidecar binary is built on that
+# platform's runner and gets a /health smoke test before being packaged.
+#
+# Two ways to run:
+#   - workflow_dispatch: a dry run — installers land as workflow artifacts.
+#   - pushing a tag vX.Y.Z (matching package.json's version): the same
+#     build, then a GitHub release is created with the installers attached.
+#
+# Installers are unsigned: macOS needs right-click > Open, Windows needs
+# SmartScreen's "Run anyway", Linux needs chmod +x on the AppImage.
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,6 +38,16 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+
+      - name: Check the tag matches package.json's version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          v=$(jq -r .version package.json)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $v" >&2
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -82,3 +104,24 @@ jobs:
             release/*.exe
             release/*.AppImage
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" installers/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "dd-edit $GITHUB_REF_NAME" \
+            --generate-notes
