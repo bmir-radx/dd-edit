@@ -21,11 +21,19 @@ from source (see [Development](#development)).
 ## Opening a dictionary
 
 dd-edit opens data dictionaries saved as CSV, LinkML YAML, or dd-json — use
-**Open…** (⌘O) or the buttons on the welcome screen. REDCap data dictionary
-exports open too: they are brought in as an import (the title shows the
-source, e.g. `study.csv (imported)`), and saving writes a standard data
-dictionary, since REDCap's own format cannot express everything the
-specification can.
+**Open…** (⌘O) or the buttons on the welcome screen. These are not arbitrary
+formats. A CSV must follow the
+[data dictionary specification](https://github.com/bmir-radx/radx-data-dictionary-specification):
+one row per data element, under the specification's column headers (`Id`,
+`Label`, `Datatype`, and so on). A CSV of study data, or a dictionary laid
+out to some other convention, will not open. Likewise, LinkML YAML must have
+the form described in [Relationship to
+LinkML](#relationship-to-linkml).
+
+REDCap data dictionary exports are the exception: they are recognized and
+brought in as an import (the title shows the source, e.g.
+`study.csv (imported)`), and saving writes a standard data dictionary, since
+REDCap's own format cannot express everything the specification can.
 
 ## Editing in the grid
 
