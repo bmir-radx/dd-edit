@@ -137,15 +137,82 @@ pre.preview {
 }
 pre.preview.stale { opacity: 0.5; }
 
-/* YAML syntax highlighting (LinkML preview) */
-.y-key { color: #005cc5; }       /* keys: blue */
-.y-punct { color: #6a737d; }     /* colons */
-.y-dash { color: #6a737d; }      /* list markers */
-.y-str { color: #0a7d33; }       /* quoted strings: green */
-.y-num { color: #b31d28; }       /* numbers: red */
-.y-kw { color: #d73a49; }        /* true/false/null: red */
-.y-plain { color: #24292e; }     /* unquoted scalars */
-.y-comment { color: #6a737d; font-style: italic; }
+/* CSV preview: the serialization as a table, not raw text. */
+.csv-scroll { flex: 1; overflow: auto; min-height: 0; }
+.csv-scroll.stale { opacity: 0.5; }
+.csv-empty { padding: 24px; color: var(--text-dim); font-size: 13px; }
+.csv-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.csv-table th,
+.csv-table td {
+  padding: 4px 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  max-width: 340px;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+.csv-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f6f8fa;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.csv-table td:empty { background: #fcfcfd; }
+.csv-table tbody tr:hover td { background: var(--accent-soft); }
+.csv-table .line-no {
+  position: sticky;
+  left: 0;
+  background: #f6f8fa;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: right;
+  min-width: 34px;
+  border-right: 1px solid var(--border);
+}
+.csv-table thead .line-no { z-index: 2; }
+
+/* ------------------------------------------------ YAML (LinkML) preview
+ *
+ * Documentation styling, not a code-editor theme: Geist Mono (bundled
+ * locally as .woff2, ligatures off), warm off-white paper, muted structural
+ * color. Keys carry the Medium weight; scalars read as body text.
+ */
+.yaml-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: #fafaf8;
+}
+pre.preview.yaml {
+  background: #fafaf8;
+  color: #292d32;
+  font-family: 'Geist Mono', Menlo, ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+  padding: 18px 20px;
+}
+/* Muted but distinct inks (Flexoki-style 600s): structure cool, data warm. */
+.y-key { color: #5e409d; font-weight: 500; }       /* nested property keys: violet */
+.y-key-top { color: #205ea6; }                     /* top-level keys: navy */
+.y-punct { color: #8b929a; }                       /* colons */
+.y-dash { color: #8b929a; }                        /* list markers */
+.y-str { color: #24837b; }                         /* quoted strings: muted teal */
+.y-num { color: #bc5215; }                         /* numbers: burnt orange */
+.y-kw { color: #af3029; }                          /* true/false/null: muted red */
+.y-plain { color: #292d32; }                       /* unquoted scalars: body ink */
+.y-comment { color: #7c8590; font-weight: 400; font-style: normal; font-size: 92%; }
 
 /* ------------------------------------------------------------ inspector */
 
@@ -155,7 +222,11 @@ pre.preview.stale { opacity: 0.5; }
 /* Sticky element header — always know which element you're editing. */
 .inspector-head {
   position: sticky;
-  top: -14px;                       /* cancels the inspector's top padding */
+  /* Sticky offsets are relative to the scroll container (.panel .body), and
+     the negative margins already place the head flush with its top — so 0
+     keeps the full header (padding included) visible when stuck. A negative
+     top would clip the padding and crush the id against the tab bar. */
+  top: 0;
   margin: -14px -14px 14px;
   padding: 12px 16px;
   background: #f7f8fa;
@@ -190,8 +261,10 @@ pre.preview.stale { opacity: 0.5; }
   letter-spacing: 0.05em;
   color: var(--text-dim);
 }
-.inspector label.field { display: block; margin-bottom: 12px; }
-.inspector label.field:last-child { margin-bottom: 0; }
+/* Both <label class="field"> and <div class="field"> (list editors) space
+   identically — a div.field followed by another field was previously flush. */
+.inspector .field { display: block; margin-bottom: 12px; }
+.inspector .field:last-child { margin-bottom: 0; }
 .inspector label.field > span {
   display: block;
   font-size: 12px;
@@ -259,58 +332,6 @@ pre.preview.stale { opacity: 0.5; }
   margin-bottom: 5px;
 }
 
-/* Chip/tag editor: chips wrap in a field-like box with a trailing input. */
-.tag-editor {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-items: center;
-  min-height: 34px;
-  padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-}
-.tag-editor:focus-within { outline: 3px solid var(--accent-soft); border-color: var(--accent); }
-.tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 3px 2px 9px;
-  background: #eef4ff;
-  color: #1d4ed8;
-  border: 1px solid #d3e0fb;
-  border-radius: 999px;
-  font-size: 12px;
-  max-width: 100%;
-}
-.tag .tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag .tag-x {
-  border: none;
-  background: transparent;
-  color: #1d4ed8;
-  padding: 0 4px;
-  font-size: 14px;
-  line-height: 1;
-  border-radius: 999px;
-  opacity: 0.6;
-}
-.tag .tag-x:hover { opacity: 1; background: #d3e0fb; }
-
-/* Ontology-term chips: violet, matching the grid's terms pills. */
-.tag.violet { background: #ede9fe; color: #6d28d9; border-color: #ddd6fe; }
-.tag.violet .tag-x { color: #6d28d9; }
-.tag.violet .tag-x:hover { background: #ddd6fe; }
-.tag-editor .tag-input {
-  flex: 1;
-  min-width: 90px;
-  border: none;
-  outline: none;
-  padding: 2px;
-  font: inherit;
-  background: transparent;
-}
-.tag-editor .tag-input:focus { outline: none; }
 
 .inspector .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .inspector .check {
@@ -325,8 +346,10 @@ pre.preview.stale { opacity: 0.5; }
 .enum-item {
   display: grid;
   grid-template-columns: 80px 1fr 24px;
-  gap: 5px;
-  margin-bottom: 10px;
+  /* Tight row gap keeps the optional IRI line visually attached to its
+     value/label pair; the larger bottom margin separates whole items. */
+  gap: 4px 8px;
+  margin-bottom: 12px;
   align-items: center;
 }
 /* The value is the stored code — render the input as a blue code chip,
@@ -352,6 +375,105 @@ pre.preview.stale { opacity: 0.5; }
 }
 .enum-item .remove:hover { color: var(--danger); background: transparent; border: none; }
 .add-item { margin-top: 6px; font-size: 12px; padding: 5px 11px; }
+
+/* Plain string list rows (aliases): input + remove, like enum items. */
+.list-item {
+  display: grid;
+  grid-template-columns: 1fr 24px;
+  gap: 5px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.list-item .remove {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1;
+}
+.list-item .remove:hover { color: var(--danger); background: transparent; border: none; }
+
+/* Ontology term rows: identifier + browse link + remove, label underneath. */
+.term-item {
+  display: grid;
+  grid-template-columns: 1fr 22px 24px;
+  gap: 2px 5px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.term-item input.term {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 11.5px;
+  color: #6d28d9;
+}
+.term-item .linkout {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+}
+.term-item .linkout:disabled { color: #c9cfd6; }
+.term-item .linkout:not(:disabled):hover { color: #1d4ed8; background: transparent; }
+.term-item .remove {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1;
+}
+.term-item .remove:hover { color: var(--danger); background: transparent; border: none; }
+.term-item .term-label {
+  grid-column: 1 / 4;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-left: 2px;
+}
+.term-item .term-label.warn { color: #9a6700; }
+
+/* Inline field help: the (?) toggle in a label and its expanded note. */
+.help-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid #c9cfd6;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+.help-dot:hover, .help-dot.open { color: var(--accent); border-color: var(--accent); background: #fff; }
+.field-help {
+  display: block;
+  margin: 5px 0 7px;
+  padding: 8px 10px;
+  background: #f6f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: #57606a;
+}
+.field-help code {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 10.5px;
+  background: #eef1f4;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #1f2328;
+}
 
 /* ------------------------------------------------- modified indicators */
 
@@ -410,6 +532,153 @@ button.toggled {
   color: var(--accent);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
+
+/* ------------------------------------------- precondition assistance */
+
+.pc-wrap { position: relative; }
+.pc-wrap input { width: 100%; box-sizing: border-box; }
+.pc-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin-top: 2px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow: auto;
+}
+.pc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: default;
+}
+.pc-item.hi { background: var(--accent-soft); }
+.pc-item .main { font-family: Menlo, ui-monospace, monospace; white-space: nowrap; }
+.pc-item .main.field { color: #1d4ed8; }
+.pc-item .main.value { color: #24837b; }
+.pc-item .detail {
+  margin-left: auto;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The visual read-back under the input. */
+.pc-hint { margin-top: 5px; font-size: 11px; color: var(--text-dim); }
+.pc-error { margin-top: 5px; font-size: 11px; color: #9a6700; }
+.pc-warn { margin-top: 3px; font-size: 11px; color: #9a6700; }
+.pc-view {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 5px;
+  font-size: 12px;
+}
+.pc-run { display: contents; }
+.pc-when { color: var(--text-dim); font-size: 11px; }
+.pc-field {
+  background: #eef4ff;
+  color: #1d4ed8;
+  padding: 1px 8px;
+  border-radius: 9px;
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 11px;
+}
+.pc-val {
+  background: #e6f5f2;
+  color: #1d685f;
+  padding: 1px 8px;
+  border-radius: 9px;
+}
+.pc-op { color: #57606a; }
+.pc-conn {
+  color: #57606a;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 2px;
+}
+.pc-paren { color: #9aa2ab; }
+
+/* Actionable fix suggestions (unit → UCUM, datatype → native, enum →
+   integer): an amber note with the message left and the action button
+   pinned right, vertically centered. The message lives in one .msg span,
+   so its text and code chips keep normal inline flow and wrap as a
+   sentence; only the button is a separate flex item. */
+.fix-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  background: #fff8e6;
+  border: 1px solid #f0e0b0;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #7a5c10;
+}
+.fix-hint .msg { flex: 1; min-width: 0; }
+.fix-hint code {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 11px;
+  background: #fdf0cd;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #6d5309;
+}
+.fix-hint button {
+  flex-shrink: 0;
+  padding: 3px 11px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  border: 1px solid #e4cd85;
+  border-radius: 6px;
+  background: #fff;
+  color: #8a6800;
+  cursor: pointer;
+}
+.fix-hint button:hover { background: #fdf3d0; }
+
+/* UCUM assistance under the Unit field. */
+.unit-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.unit-hint.ok { color: #1a7f37; }
+.unit-hint code {
+  font-family: Menlo, ui-monospace, monospace;
+  background: #eef1f4;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #1f2328;
+}
+.unit-hint button {
+  font-size: 11px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--accent);
+  cursor: pointer;
+}
+.unit-hint button:hover { background: var(--accent-soft); }
 
 .md-preview {
   border: 1px solid var(--border);

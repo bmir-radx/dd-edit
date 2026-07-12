@@ -68,6 +68,12 @@ export function App() {
       return next
     })
   }, [])
+  // The last-opened dictionary, for the welcome screen's reopen button.
+  const [lastFile, setLastFile] = useState<string | null>(null)
+  useEffect(() => {
+    window.ddEdit.lastFile().then(setLastFile, () => {})
+  }, [])
+
   const [panelWidth, setPanelWidth] = useState(() => {
     const stored = Number(localStorage.getItem('dd-edit.panelWidth'))
     return stored >= 280 && stored <= 800 ? stored : 400
@@ -117,24 +123,34 @@ export function App() {
       loadDocument(await parseToDocument(file.content), file.path)
       setCursorRow(null)
     } catch (err) {
-      // Sniff-and-offer: a CSV that fails dictionary parsing but imports as
-      // REDCap gets offered as an import instead of a bare error.
+      // A CSV that fails dictionary parsing but imports as REDCap just opens:
+      // making the user find Import… first is hostile. The import is untitled
+      // (REDCap is an import format, not a save format), and we say so.
       try {
         const imported = await sidecar.importRedcap(file.content)
-        if (
-          window.confirm(
-            `${baseName(file.path)} is not a data dictionary, but it looks like a REDCap export ` +
-              `(${imported.elements} fields). Import it?`,
-          )
-        ) {
-          loadDocument(JSON.parse(imported.content), null)
-          setCursorRow(null)
-        }
+        loadDocument(JSON.parse(imported.content), null)
+        setCursorRow(null)
+        window.alert(
+          `Imported ${baseName(file.path)} as a REDCap export (${imported.elements} fields).\n\n` +
+            `REDCap format cannot be saved back — use Save to write it as a standard ` +
+            `data dictionary (CSV, LinkML YAML, or dd-json).`,
+        )
       } catch {
         window.alert(`Could not open ${baseName(file.path)}:\n${err instanceof Error ? err.message : err}`)
       }
     }
   }, [confirmDiscard, loadDocument])
+
+  const doReopenLast = useCallback(async () => {
+    if (!lastFile || !confirmDiscard()) return
+    try {
+      const file = await window.ddEdit.openPath(lastFile)
+      loadDocument(await parseToDocument(file.content), file.path)
+      setCursorRow(null)
+    } catch (err) {
+      window.alert(`Could not reopen ${baseName(lastFile)}:\n${err instanceof Error ? err.message : err}`)
+    }
+  }, [lastFile, confirmDiscard, loadDocument])
 
   const doImportRedcap = useCallback(async () => {
     if (!confirmDiscard()) return
@@ -338,7 +354,14 @@ export function App() {
             <h2>dd-edit</h2>
             <div>Edit data dictionaries like a spreadsheet.</div>
             <div className="actions">
-              <button className="primary" onClick={() => void doOpen()}>Open a dictionary…</button>
+              {lastFile ? (
+                <button className="primary" onClick={() => void doReopenLast()}>
+                  Reopen {baseName(lastFile)}
+                </button>
+              ) : null}
+              <button className={lastFile ? '' : 'primary'} onClick={() => void doOpen()}>
+                Open a dictionary…
+              </button>
               <button onClick={() => void doImportRedcap()}>Import a REDCap export…</button>
               <button onClick={addElement}>Start from scratch</button>
             </div>

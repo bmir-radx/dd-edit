@@ -12,10 +12,10 @@ license = { text = "BSD-2-Clause" }
 dependencies = [
     # The data dictionary toolkit, pinned to a released tag so the app ships
     # against a known-good build. Bump deliberately.
-    "dd-api @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.4#subdirectory=api",
-    "dd-validate @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.4#subdirectory=validator",
-    "dd-printer @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.4#subdirectory=printer",
-    "dd-redcap @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.4#subdirectory=redcap",
+    "dd-api @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.5#subdirectory=api",
+    "dd-validate @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.5#subdirectory=validator",
+    "dd-printer @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.5#subdirectory=printer",
+    "dd-redcap @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.5#subdirectory=redcap",
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "pyyaml",  # format sniffing

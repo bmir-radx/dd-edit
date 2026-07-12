@@ -54,11 +54,14 @@ function highlightLine(line: string): ReactNode {
     const hashAt = after.indexOf(' #')
     const valuePart = hashAt >= 0 ? after.slice(0, hashAt) : after
     const comment = hashAt >= 0 ? after.slice(hashAt) : ''
+    // Top-level keys (no indentation, not list entries) carry more structural
+    // weight than nested property keys, and color differently.
+    const keyCls = indent === '' && !dash ? 'y-key y-key-top' : 'y-key'
     return (
       <>
         {indent}
         {dash ? <span className="y-dash">{dash}</span> : null}
-        <span className="y-key">{key}</span>
+        <span className={keyCls}>{key}</span>
         <span className="y-punct">{colon}</span>
         {valuePart ? highlightScalar(valuePart, '') : null}
         {comment ? <span className="y-comment">{comment}</span> : null}

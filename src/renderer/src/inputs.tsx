@@ -10,9 +10,11 @@ interface CommitProps {
   onCommit: (value: string) => void
   placeholder?: string
   className?: string
+  /** id of a <datalist> for native autocomplete suggestions. */
+  list?: string
 }
 
-export function CommitInput({ value, onCommit, placeholder, className }: CommitProps) {
+export function CommitInput({ value, onCommit, placeholder, className, list }: CommitProps) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
 
@@ -29,6 +31,7 @@ export function CommitInput({ value, onCommit, placeholder, className }: CommitP
       className={className}
       value={draft}
       placeholder={placeholder}
+      list={list}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={onKeyDown}
@@ -99,61 +102,41 @@ export function CommitTextarea({ value, onCommit, placeholder, rows }: CommitPro
 }
 
 /**
- * Tag/chip editor for a list of short string values (aliases, terms,
- * examples). Each value is a removable chip; a trailing input adds one on
- * Enter or comma. Editing a chip's text is done by removing and re-adding —
- * fine for the short values these hold.
+ * List editor for a list of plain string values (aliases): one editable text
+ * row per value (commit-on-blur, so one undo step per edit), a remove button
+ * per row, and an add-row button. Committing a row as empty removes it.
  */
-export function TagEditor({
+export function StringListEditor({
   values,
   onChange,
   placeholder,
-  variant,
+  addLabel,
 }: {
   values: string[]
   onChange: (values: string[]) => void
   placeholder?: string
-  /** Chip color; 'violet' for ontology terms, default blue otherwise. */
-  variant?: 'violet'
+  addLabel: string
 }) {
-  const [draft, setDraft] = useState('')
-
-  const add = () => {
-    const v = draft.trim()
-    if (v !== '' && !values.includes(v)) onChange([...values, v])
-    setDraft('')
+  const update = (i: number, v: string) => {
+    const text = v.trim()
+    onChange(
+      text === '' ? values.filter((_, j) => j !== i) : values.map((old, j) => (j === i ? text : old)),
+    )
   }
-  const removeAt = (i: number) => onChange(values.filter((_, j) => j !== i))
+  const remove = (i: number) => onChange(values.filter((_, j) => j !== i))
 
-  const tagClass = `tag${variant === 'violet' ? ' violet' : ''}`
   return (
-    <div className="tag-editor">
+    <div>
       {values.map((v, i) => (
-        <span className={tagClass} key={`${v}-${i}`}>
-          <span className="tag-text">{v}</span>
-          <button type="button" className="tag-x" title="Remove" onClick={() => removeAt(i)}>
-            ×
-          </button>
-        </span>
+        <div className="list-item" key={i}>
+          <CommitInput value={v} placeholder={placeholder} onCommit={(next) => update(i, next)} />
+          <button className="remove" title="Remove" onClick={() => remove(i)}>×</button>
+        </div>
       ))}
-      <input
-        type="text"
-        className="tag-input"
-        value={draft}
-        placeholder={values.length === 0 ? placeholder : ''}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={add}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ',') {
-            e.preventDefault()
-            add()
-          } else if (e.key === 'Backspace' && draft === '' && values.length > 0) {
-            removeAt(values.length - 1)
-          } else if (e.key === 'Escape') {
-            setDraft('')
-          }
-        }}
-      />
+      <button className="add-item" onClick={() => onChange([...values, ''])}>
+        {addLabel}
+      </button>
     </div>
   )
 }
+

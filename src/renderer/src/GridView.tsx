@@ -23,15 +23,18 @@ import {
   type EditableGridCell,
   type GridCell,
   type GridColumn,
+  type GridMouseEventArgs,
   type GridSelection,
   type Item,
 } from '@glideapps/glide-data-grid'
 import '@glideapps/glide-data-grid/dist/index.css'
-import { useCallback, useMemo, useState, type Ref } from 'react'
+import { useCallback, useEffect, useMemo, useState, type Ref } from 'react'
 import { deleteElements, emptyElement, insertElement, moveElement, setField } from './model/document'
 import { useEditor } from './model/store'
 import { pillColors } from './pillColors'
 import { findingRow, type Finding, type FindingLevel } from './sidecar'
+import { needsIntegerDatatype } from './datatypes'
+import { ucumSuggestion, ucumUnit } from './ucum'
 import type { DataElement, EnumItem } from './types/document'
 
 /** The validator reports CSV column headers; map them to element fields. */
@@ -336,9 +339,10 @@ const COLUMNS: ColumnSpec[] = [
   { key: '__mod', title: '', width: 34, kind: 'modified' },
   // Section leads: its pastel band is the grouping gutter, frozen with Id.
   { key: 'section', title: 'Section', width: 130, kind: 'text', nullable: true },
-  { key: 'id', title: 'Id', width: 160, kind: 'text' },
+  { key: 'id', title: 'Id', width: 130, kind: 'text' },
   { key: 'label', title: 'Label', width: 200, kind: 'text' },
-  { key: 'datatype', title: 'Datatype', width: 110, kind: 'text' },
+  // Wide enough for "string" + the "→ integer" fix pill without clipping.
+  { key: 'datatype', title: 'Datatype', width: 145, kind: 'text' },
   { key: 'cardinality', title: 'Cardinality', width: 100, kind: 'text' },
   { key: 'required', title: 'Required', width: 85, kind: 'boolean' },
   { key: 'unit', title: 'Unit', width: 90, kind: 'text', nullable: true },
@@ -360,6 +364,43 @@ export const WRAPPABLE_KEYS: string[] = COLUMNS.filter(
   (c) => c.kind === 'text' || c.kind === 'markdown' || c.kind === 'bubble',
 ).map((c) => c.key as string)
 
+// The frozen columns (modified dot, Section, Id) keep their place; everything
+// after Id can be drag-reordered. Order and widths are presentation only —
+// serialization always uses the canonical field order — and persist across
+// sessions alongside the wrap setting.
+const FROZEN_COUNT = 3
+const MOVABLE_DEFAULT: string[] = COLUMNS.slice(FROZEN_COUNT).map((c) => c.key as string)
+
+function loadColOrder(): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem('dd-edit.colOrder') ?? '[]')
+    const valid = Array.isArray(stored)
+      ? (stored as unknown[]).filter(
+          (k): k is string => typeof k === 'string' && MOVABLE_DEFAULT.includes(k),
+        )
+      : []
+    // Columns added to the spec since the order was saved append at the end.
+    return [...valid, ...MOVABLE_DEFAULT.filter((k) => !valid.includes(k))]
+  } catch {
+    return MOVABLE_DEFAULT
+  }
+}
+
+function loadColWidths(): Record<string, number> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem('dd-edit.colWidths') ?? '{}')
+    const widths: Record<string, number> = {}
+    if (stored !== null && typeof stored === 'object') {
+      for (const [k, v] of Object.entries(stored)) {
+        if (typeof v === 'number' && v >= 40 && v <= 2000) widths[k] = v
+      }
+    }
+    return widths
+  } catch {
+    return {}
+  }
+}
+
 const BUBBLE_CAP = 6
 
 function bubbles(key: keyof DataElement, element: DataElement, capped: boolean): string[] {
@@ -380,6 +421,65 @@ const PILL_H = 18
 const PILL_GAP = 4
 const PILL_PAD_X = 8
 const PILL_FONT = `12px ${FONT_FAMILY}`
+
+// Unit-cell geometry, shared by drawCell and the onCellClicked hit test for
+// the "→ ucum" fix pill. UNIT_PAD_X must match the theme's horizontal cell
+// padding (GDG default: 8).
+const UNIT_PAD_X = 8
+const UNIT_FIX_GAP = 6
+const UNIT_FIX_PAD_X = 6
+
+/** The fix pill's [start, end] x-range within a unit cell, or null. */
+function unitFixPillRange(raw: string): [number, number] | null {
+  if (raw === '' || ucumUnit(raw) !== undefined) return null
+  const suggestion = ucumSuggestion(raw)
+  if (suggestion === null) return null
+  const ctx = getMeasureCtx() // leaves BASE_FONT set
+  const w = ctx.measureText(raw).width
+  ctx.font = PILL_FONT
+  const pw = ctx.measureText(`→ ${suggestion.code}`).width + UNIT_FIX_PAD_X * 2
+  const x = UNIT_PAD_X + w + UNIT_FIX_GAP
+  return [x, x + pw]
+}
+
+/**
+ * The "→ integer" fix pill's [start, end] x-range within a datatype cell
+ * (after the datatype pill), or null when the element doesn't need it.
+ * Shared by drawCell and the onCellClicked hit test.
+ */
+function datatypeFixPillRange(
+  element: DataElement,
+  cellWidth: number,
+): [number, number] | null {
+  if (!needsIntegerDatatype(element)) return null
+  const ctx = getMeasureCtx()
+  ctx.font = PILL_FONT
+  const pillW = Math.min(ctx.measureText(element.datatype).width + 16, cellWidth - 12)
+  const x = 6 + pillW + UNIT_FIX_GAP
+  const w = ctx.measureText('→ integer').width + UNIT_FIX_PAD_X * 2
+  return [x, x + w]
+}
+
+/**
+ * Whether a point (cell-local coordinates) lands on the cell's fix pill:
+ * "→ ucum" in unit cells, "→ integer" in datatype cells. The pill's box is
+ * its x-range at pill height around the first-line center. Shared by the
+ * click handler (apply the fix) and the hover handler (pointer cursor).
+ */
+function fixPillHit(
+  key: string | undefined,
+  element: DataElement,
+  x: number,
+  y: number,
+  bounds: { width: number; height: number },
+): boolean {
+  let range: [number, number] | null = null
+  if (key === 'unit') range = unitFixPillRange((element.unit ?? '') as string)
+  else if (key === 'datatype') range = datatypeFixPillRange(element, bounds.width)
+  if (range === null) return false
+  const cy = firstLineCenterY(0, bounds.height)
+  return x >= range[0] && x <= range[1] && Math.abs(y - cy) <= PILL_H / 2
+}
 
 /** Rows of pills after flow-wrapping into maxWidth. */
 function bubbleRows(ctx: CanvasRenderingContext2D, items: string[], maxWidth: number): number {
@@ -427,11 +527,29 @@ export function GridView({
   const baseline = useEditor((s) => s.baseline)
   const apply = useEditor((s) => s.apply)
 
-  const [widths, setWidths] = useState<Record<string, number>>({})
+  const [widths, setWidths] = useState<Record<string, number>>(loadColWidths)
+  const [colOrder, setColOrder] = useState<string[]>(loadColOrder)
   const [selection, setSelection] = useState<GridSelection>({
     columns: CompactSelection.empty(),
     rows: CompactSelection.empty(),
   })
+
+  useEffect(() => {
+    localStorage.setItem('dd-edit.colWidths', JSON.stringify(widths))
+  }, [widths])
+  useEffect(() => {
+    localStorage.setItem('dd-edit.colOrder', JSON.stringify(colOrder))
+  }, [colOrder])
+
+  // The columns in display order: frozen prefix + the user's saved order.
+  // Everything that receives a grid column index resolves it through this.
+  const specs = useMemo<ColumnSpec[]>(() => {
+    const byKey = new Map(COLUMNS.map((c) => [c.key as string, c]))
+    return [
+      ...COLUMNS.slice(0, FROZEN_COUNT),
+      ...colOrder.map((k) => byKey.get(k)).filter((c): c is ColumnSpec => c !== undefined),
+    ]
+  }, [colOrder])
 
   const baselineRefs = useMemo(() => new Set<DataElement>(baseline.elements), [baseline])
   const sectionColors = useMemo(() => sectionTints(doc.elements), [doc])
@@ -452,7 +570,7 @@ export function GridView({
 
   const columns = useMemo<GridColumn[]>(
     () =>
-      COLUMNS.map((c) => ({
+      specs.map((c) => ({
         id: c.key,
         title: c.title,
         width: widths[c.key] ?? c.width,
@@ -462,7 +580,7 @@ export function GridView({
         hasMenu: WRAPPABLE_KEYS.includes(c.key as string),
         menuIcon: 'none',
       })),
-    [widths],
+    [widths, specs],
   )
 
   // Every row is exactly as tall as its tallest wrapped cell (text,
@@ -495,9 +613,13 @@ export function GridView({
     })
   }, [doc, widths, wrappedCols])
 
+  // Which cell's fix pill is under the pointer (see onItemHovered below):
+  // that one cell reports cursor: pointer through getCellContent.
+  const [pillHover, setPillHover] = useState<{ col: number; row: number } | null>(null)
+
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
-      const spec = COLUMNS[col]
+      const spec = specs[col]
       const element = doc.elements[row]
       if (!spec || !element) {
         return { kind: GridCellKind.Text, data: '', displayData: '', allowOverlay: false }
@@ -563,14 +685,18 @@ export function GridView({
         allowOverlay: true,
         allowWrapping: wrappedCols.has(spec.key as string), // multiline overlay editor
         ...(Object.keys(over).length > 0 ? { themeOverride: over } : {}),
+        // Pointer cursor while the mouse is over this cell's fix pill.
+        ...(pillHover !== null && pillHover.col === col && pillHover.row === row
+          ? { cursor: 'pointer' as const }
+          : {}),
       }
     },
-    [doc, cellLevels, baselineRefs, wrappedCols, sectionColors],
+    [doc, cellLevels, baselineRefs, wrappedCols, sectionColors, specs, pillHover],
   )
 
   const onCellEdited = useCallback(
     ([col, row]: Item, newValue: EditableGridCell) => {
-      const spec = COLUMNS[col]
+      const spec = specs[col]
       if (!spec || spec.kind === 'modified' || spec.kind === 'bubble') return
       if (newValue.kind === GridCellKind.Boolean && spec.key === 'required') {
         apply((d) => setField(d, row, 'required', Boolean(newValue.data)))
@@ -594,7 +720,7 @@ export function GridView({
       const value = spec.nullable && text === '' ? null : text
       apply((d) => setField(d, row, spec.key as ScalarKey, value))
     },
-    [apply],
+    [apply, specs],
   )
 
   const onRowAppended = useCallback(() => {
@@ -650,7 +776,7 @@ export function GridView({
   const drawCell: DrawCellCallback = useCallback(
     (args, drawContent) => {
       const { ctx, rect, col, cell, theme } = args
-      const spec = COLUMNS[col]
+      const spec = specs[col]
       const key = spec?.key
 
       if (
@@ -678,7 +804,72 @@ export function GridView({
         ctx.textBaseline = 'middle'
         ctx.fillText(text, x + 8, cy + 0.5)
         ctx.restore()
+
+        // Datatype cells of all-integer enumerated fields get an amber
+        // "→ integer" fix pill (clickable — see onCellClicked, which shares
+        // the geometry via datatypeFixPillRange).
+        if (key === 'datatype') {
+          const element = doc.elements[args.row]
+          const range =
+            element !== undefined ? datatypeFixPillRange(element, rect.width) : null
+          if (range !== null) {
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(rect.x, rect.y, rect.width, rect.height)
+            ctx.clip()
+            ctx.font = PILL_FONT
+            ctx.textBaseline = 'middle'
+            ctx.beginPath()
+            ctx.roundRect(rect.x + range[0], cy - PILL_H / 2, range[1] - range[0], PILL_H, PILL_H / 2)
+            ctx.fillStyle = '#fef3c7'
+            ctx.fill()
+            ctx.fillStyle = '#92400e'
+            ctx.fillText('→ integer', rect.x + range[0] + UNIT_FIX_PAD_X, cy + 0.5)
+            ctx.restore()
+          }
+        }
         return
+      }
+
+      // Unit cells: a recognized UCUM code shows its name dimmed after the
+      // symbol ("mg (milligram)"); an informal spelling with a known UCUM
+      // equivalent shows an amber "→ code" fix pill (clickable — see
+      // onCellClicked, which shares the geometry below). Display only: the
+      // cell's value (edit, copy, search) stays the raw text.
+      if (key === 'unit' && cell.kind === GridCellKind.Text && cell.displayData !== '') {
+        const name = ucumUnit(cell.displayData)?.name
+        const suggestion = name === undefined ? ucumSuggestion(cell.displayData) : null
+        if (name !== undefined || suggestion !== null) {
+          const symbol = cell.displayData
+          const cy = firstLineCenterY(rect.y, rect.height)
+          ctx.save()
+          ctx.beginPath()
+          ctx.rect(rect.x, rect.y, rect.width, rect.height)
+          ctx.clip()
+          ctx.textBaseline = 'middle'
+          ctx.font = BASE_FONT
+          ctx.fillStyle = theme.textDark
+          ctx.fillText(symbol, rect.x + UNIT_PAD_X, cy)
+          const w = ctx.measureText(symbol).width
+          if (name !== undefined) {
+            ctx.font = `12px ${theme.fontFamily}`
+            ctx.fillStyle = theme.textLight
+            ctx.fillText(`(${name})`, rect.x + UNIT_PAD_X + w + 5, cy)
+          } else if (suggestion !== null) {
+            ctx.font = PILL_FONT
+            const label = `→ ${suggestion.code}`
+            const pw = ctx.measureText(label).width + UNIT_FIX_PAD_X * 2
+            const x = rect.x + UNIT_PAD_X + w + UNIT_FIX_GAP
+            ctx.beginPath()
+            ctx.roundRect(x, cy - PILL_H / 2, pw, PILL_H, PILL_H / 2)
+            ctx.fillStyle = '#fef3c7'
+            ctx.fill()
+            ctx.fillStyle = '#92400e'
+            ctx.fillText(label, x + UNIT_FIX_PAD_X, cy + 0.5)
+          }
+          ctx.restore()
+          return
+        }
       }
 
       // Pill lists (enumeration, terms, ...): draw our own flowed pills when
@@ -686,13 +877,11 @@ export function GridView({
       // (so the pills top-align with sibling cells instead of centering).
       const colWrapped = spec !== undefined && wrappedCols.has(spec.key as string)
       const tallRow = rect.height > MIN_ROW_HEIGHT + 2
-      // Colored pill columns (enumeration, missing values, terms) always
-      // custom-draw so their color shows; plain lists (aliases, examples) only
+      // Colored pill columns (missing values, terms) always custom-draw so
+      // their color shows; plain lists (enumeration, aliases, examples) only
       // when wrapped or in a tall row (else GDG's default bubble is fine).
       const coloredPillCol =
-        spec?.key === 'enumeration' ||
-        spec?.key === 'missing_value_codes' ||
-        spec?.key === 'terms'
+        spec?.key === 'missing_value_codes' || spec?.key === 'terms'
       const drawBubble = colWrapped || tallRow || coloredPillCol
       if (drawBubble && cell.kind === GridCellKind.Bubble && cell.data.length > 0) {
         ctx.save()
@@ -707,13 +896,13 @@ export function GridView({
         // First pill row centered on the shared first-line center, so it lines
         // up with plain text / pills in sibling cells.
         let y = firstLineCenterY(rect.y, rect.height) - PILL_H / 2
-        // Per-column pill colors from the shared palette: enumeration & missing
-        // values blue (the "value" identity), ontology terms violet, other
-        // lists neutral gray.
+        // Per-column pill colors from the shared palette: missing values blue
+        // (the "value" identity), ontology terms violet, other lists
+        // (including enumeration) neutral gray.
         const key = spec?.key
         let pillBg = '#eef1f4'
         let pillFg = '#374151'
-        if (key === 'enumeration' || key === 'missing_value_codes') {
+        if (key === 'missing_value_codes') {
           pillBg = '#eef4ff'
           pillFg = '#1d4ed8'
         } else if (key === 'terms') {
@@ -827,18 +1016,85 @@ export function GridView({
 
       drawContent()
     },
-    [wrappedCols],
+    [wrappedCols, specs, doc],
   )
 
   const onHeaderMenuClick = useCallback(
     (col: number, bounds: { x: number; y: number; width: number; height: number }) => {
-      const spec = COLUMNS[col]
+      const spec = specs[col]
       if (spec && WRAPPABLE_KEYS.includes(spec.key as string)) {
         onHeaderMenu(spec.key as string, { x: bounds.x, y: bounds.y + bounds.height })
       }
     },
-    [onHeaderMenu],
+    [onHeaderMenu, specs],
   )
+
+  // Clicking a fix pill applies its suggestion: "→ ucum" in unit cells,
+  // "→ integer" in datatype cells. fixPillHit covers the pill's actual box
+  // (geometry mirrors drawCell via the shared *FixPillRange helpers), so
+  // ordinary clicks elsewhere in the cell never trigger the fix.
+  const onCellClicked = useCallback(
+    (
+      [col, row]: Item,
+      event: { localEventX: number; localEventY: number; bounds: { width: number; height: number } },
+    ) => {
+      const spec = specs[col]
+      const element = doc.elements[row]
+      if (element === undefined) return
+      const key = spec?.key as string | undefined
+      if (!fixPillHit(key, element, event.localEventX, event.localEventY, event.bounds)) return
+      if (key === 'unit') {
+        const code = ucumSuggestion((element.unit ?? '') as string)!.code
+        apply((d) => setField(d, row, 'unit', code))
+      } else if (key === 'datatype') {
+        // Changing a field's datatype is consequential enough to confirm;
+        // a stray click on the pill must not silently retype the field.
+        const from = element.datatype || '(none)'
+        if (window.confirm(`Change the datatype of "${element.id}" from ${from} to integer?`)) {
+          apply((d) => setField(d, row, 'datatype', 'integer'))
+        }
+      }
+    },
+    [specs, doc, apply],
+  )
+
+  // The grid reads the mouse cursor from the hovered cell's `cursor`
+  // property, so a position-dependent cursor needs hover tracking: remember
+  // which cell's fix pill is under the pointer (pillHover above) and give
+  // that one cell cursor: pointer in getCellContent. State only changes
+  // when the pointer crosses a pill boundary, so this costs one redraw per
+  // enter/leave.
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      let next: { col: number; row: number } | null = null
+      if (args.kind === 'cell') {
+        const [col, row] = args.location
+        const spec = specs[col]
+        const element = doc.elements[row]
+        if (
+          element !== undefined &&
+          fixPillHit(spec?.key as string | undefined, element, args.localEventX, args.localEventY, args.bounds)
+        ) {
+          next = { col, row }
+        }
+      }
+      setPillHover((prev) => (prev?.col === next?.col && prev?.row === next?.row ? prev : next))
+    },
+    [specs, doc],
+  )
+
+  // Drag-reorder for the columns after Id (the frozen prefix stays put); a
+  // drop inside the frozen prefix clamps to the first movable slot.
+  const onColumnMoved = useCallback((from: number, to: number) => {
+    if (from < FROZEN_COUNT) return
+    setColOrder((prev) => {
+      const next = [...prev]
+      const [moved] = next.splice(from - FROZEN_COUNT, 1)
+      if (moved === undefined) return prev
+      next.splice(Math.max(to, FROZEN_COUNT) - FROZEN_COUNT, 0, moved)
+      return next
+    })
+  }, [])
 
   // Always-visible ⋮ menu indicator on wrappable columns (GDG only draws its
   // own on hover, and the default triangle reads as a sort arrow). Blue when
@@ -876,6 +1132,9 @@ export function GridView({
       headerIcons={{ none: () => '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"></svg>' }}
       onRowAppended={onRowAppended}
       onRowMoved={onRowMoved}
+      onColumnMoved={onColumnMoved}
+      onCellClicked={onCellClicked}
+      onItemHovered={onItemHovered}
       onDelete={onDelete}
       onColumnResize={onColumnResize}
       gridSelection={selection}

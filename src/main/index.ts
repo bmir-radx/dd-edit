@@ -10,7 +10,7 @@
  *   DD_EDIT_SIDECAR_URL  use an already-running sidecar (e.g. uvicorn --reload)
  *   DD_EDIT_SIDECAR_CMD  custom spawn command, e.g. "/path/python -m dd_edit_sidecar"
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -95,12 +95,17 @@ const REDCAP_FILTERS = [
   { name: 'All files', extensions: ['*'] },
 ]
 
-// Tiny persisted settings: currently just the folder last used in a file
-// dialog, so Open re-opens where the user actually works.
+// Tiny persisted settings: the folder last used in a file dialog (so Open
+// re-opens where the user actually works) and the last dictionary file
+// itself (so the welcome screen can offer to reopen it).
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
-let settings: { lastDir?: string } | null = null
+interface Settings {
+  lastDir?: string
+  lastFile?: string
+}
+let settings: Settings | null = null
 
-async function getSettings(): Promise<{ lastDir?: string }> {
+async function getSettings(): Promise<Settings> {
   if (settings === null) {
     try {
       settings = JSON.parse(await readFile(settingsPath(), 'utf8'))
@@ -111,17 +116,28 @@ async function getSettings(): Promise<{ lastDir?: string }> {
   return settings!
 }
 
-async function rememberDir(filePath: string): Promise<void> {
-  const s = await getSettings()
-  s.lastDir = path.dirname(filePath)
+async function saveSettings(): Promise<void> {
   try {
-    await writeFile(settingsPath(), JSON.stringify(s), 'utf8')
+    await writeFile(settingsPath(), JSON.stringify(settings ?? {}), 'utf8')
   } catch {
-    /* remembering the folder is best-effort */
+    /* remembering is best-effort */
   }
 }
 
-async function openAndRead(filters: typeof DICTIONARY_FILTERS) {
+async function rememberDir(filePath: string): Promise<void> {
+  const s = await getSettings()
+  s.lastDir = path.dirname(filePath)
+  await saveSettings()
+}
+
+async function rememberFile(filePath: string): Promise<void> {
+  const s = await getSettings()
+  s.lastDir = path.dirname(filePath)
+  s.lastFile = filePath
+  await saveSettings()
+}
+
+async function openAndRead(filters: typeof DICTIONARY_FILTERS, remember = false) {
   const { lastDir } = await getSettings()
   const res = await dialog.showOpenDialog({
     properties: ['openFile'],
@@ -130,7 +146,7 @@ async function openAndRead(filters: typeof DICTIONARY_FILTERS) {
   })
   const file = res.filePaths[0]
   if (res.canceled || !file) return null
-  void rememberDir(file)
+  void (remember ? rememberFile(file) : rememberDir(file))
   return { path: file, content: await readFile(file, 'utf8') }
 }
 
@@ -138,8 +154,18 @@ ipcMain.handle('sidecar-info', () => ({
   url: sidecarUrl,
   token: process.env.DD_EDIT_SIDECAR_URL ? null : token,
 }))
-ipcMain.handle('dialog:open', () => openAndRead(DICTIONARY_FILTERS))
+ipcMain.handle('dialog:open', () => openAndRead(DICTIONARY_FILTERS, true))
 ipcMain.handle('dialog:open-redcap', () => openAndRead(REDCAP_FILTERS))
+// The last-opened dictionary, for the welcome screen's reopen button.
+ipcMain.handle('last-file', async () => {
+  const { lastFile } = await getSettings()
+  return lastFile && existsSync(lastFile) ? lastFile : null
+})
+ipcMain.handle('file:open-path', async (_event, filePath: string) => {
+  const content = await readFile(filePath, 'utf8')
+  void rememberFile(filePath)
+  return { path: filePath, content }
+})
 ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
   // An absolute default (Save on an already-saved file) wins; otherwise
   // suggest the last-used folder.
@@ -155,6 +181,11 @@ ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
 })
 ipcMain.handle('file:save', async (_event, filePath: string, content: string) => {
   await writeFile(filePath, content, 'utf8')
+  void rememberFile(filePath) // a save-as target becomes the reopen candidate
+})
+ipcMain.handle('shell:open-external', async (_event, url: string) => {
+  // Only web URLs — never file:// or app-defined schemes from renderer input.
+  if (/^https?:\/\//i.test(url)) await shell.openExternal(url)
 })
 
 // ----------------------------------------------------------------- menu

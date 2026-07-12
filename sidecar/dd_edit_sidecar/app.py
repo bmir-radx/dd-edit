@@ -12,14 +12,32 @@ is exempt so liveness can be probed without credentials.
 
 from __future__ import annotations
 
+import inspect
 import io
 import os
+from dataclasses import fields as dataclass_fields
 from importlib.metadata import PackageNotFoundError, version
 from typing import Literal, Optional
 
 import yaml
-from dd_api import DataDictionary
+from dd_api import DataDictionary, EmitOptions
 from dd_core import ORDERED_DATATYPES
+
+try:  # the full datatype vocabulary (builtin-mapped + custom); post-v0.0.4 layout
+    from dd_core.datatypes import BUILTIN_RANGES, CUSTOM_TYPES
+
+    _DATATYPE_NAMES: list[str] = sorted(set(BUILTIN_RANGES) | set(CUSTOM_TYPES))
+except ImportError:  # pragma: no cover - older pinned toolkit
+    _DATATYPE_NAMES = sorted(ORDERED_DATATYPES)
+
+# LinkML-native names lead the /meta list (the editor shows them first).
+_LINKML_NATIVE = [
+    "string", "integer", "decimal", "float", "double", "boolean",
+    "date", "dateTime", "time", "anyURI",
+]
+_DATATYPES_ORDERED = [n for n in _LINKML_NATIVE if n in _DATATYPE_NAMES] + [
+    n for n in _DATATYPE_NAMES if n not in _LINKML_NATIVE
+]
 from dd_printer.load import load_dictionary
 from dd_printer.render_html import render_html
 from dd_redcap.convert import convert_redcap
@@ -31,6 +49,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="dd-edit sidecar", docs_url=None, redoc_url=None)
+
+# Emit the enums section (and so the boilerplate StandardMissingValueCodes)
+# after classes in LinkML previews, so a small dictionary's rendering leads
+# with its data elements. Feature-detected: the option ships in toolkit
+# releases newer than v0.0.4, and this activates automatically on a pin bump.
+_LINKML_OPTIONS = (
+    EmitOptions(enums_last=True)
+    if any(f.name == "enums_last" for f in dataclass_fields(EmitOptions))
+    else None
+)
 
 _TOOLKIT_PACKAGES = ("dd-core", "dd-linkml", "dd-api", "dd-validate", "dd-printer", "dd-redcap")
 
@@ -86,13 +114,28 @@ def _detect(text: str) -> str:
     return "csv"
 
 
+# The editor must hold invalid-but-well-formed documents (duplicate Ids) so
+# the user can see and fix them — the validator flags duplicate-id as an
+# ERROR. Feature-detected: ships in toolkit releases after v0.0.4.
+_KEEP_DUPLICATES = (
+    {"keep_duplicates": True}
+    if "keep_duplicates" in inspect.signature(DataDictionary.load).parameters
+    else {}
+)
+_ALLOW_DUPLICATE_IDS = (
+    {"allow_duplicate_ids": True}
+    if "allow_duplicate_ids" in inspect.signature(DataDictionary.from_json).parameters
+    else {}
+)
+
+
 def _load(text: str) -> DataDictionary:
     kind = _detect(text)
     if kind == "json":
-        return DataDictionary.from_json(text)
+        return DataDictionary.from_json(text, **_ALLOW_DUPLICATE_IDS)
     if kind == "linkml":
         return DataDictionary.from_linkml(io.StringIO(text))
-    return DataDictionary.load(io.StringIO(text))
+    return DataDictionary.load(io.StringIO(text), **_KEEP_DUPLICATES)
 
 
 class ConvertRequest(BaseModel):
@@ -110,6 +153,10 @@ class RenderRequest(BaseModel):
     title: Optional[str] = None
 
 
+class TermsRequest(BaseModel):
+    terms: list[str]
+
+
 class RedcapImportRequest(BaseModel):
     content: str
     provenance: str = ""
@@ -124,7 +171,7 @@ def health():
 @app.get("/meta")
 def meta():
     return {
-        "datatypes": list(ORDERED_DATATYPES),
+        "datatypes": _DATATYPES_ORDERED,
         "cardinalities": ["single", "multiple"],
         "versions": _versions(),
     }
@@ -137,12 +184,30 @@ def convert(req: ConvertRequest):
         if req.to == "csv":
             content = dd.to_csv()
         elif req.to == "linkml":
-            content = dd.to_linkml()
+            content = dd.to_linkml(_LINKML_OPTIONS)
         else:
             content = dd.to_json(compact=req.compact)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"content": content, "detected": _detect(req.content)}
+
+
+@app.post("/terms")
+def terms(req: TermsRequest):
+    """Resolve ontology term identifiers to human-readable labels (via OLS4).
+
+    Needs network access; unresolved terms are simply absent from the result,
+    so the app can cache both hits and misses. Capped to keep one request from
+    fanning out into hundreds of upstream lookups.
+    """
+    from dd_core.terms_lookup import lookup_labels
+
+    requested = [t for t in dict.fromkeys(req.terms) if t.strip()][:100]
+    try:
+        labels = lookup_labels(requested)
+    except Exception as exc:  # lookup errors are not the caller's fault
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"labels": labels}
 
 
 @app.post("/validate")

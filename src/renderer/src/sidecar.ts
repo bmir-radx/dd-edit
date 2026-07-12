@@ -65,6 +65,10 @@ export const sidecar = {
 
   importRedcap: (content: string, provenance = '') =>
     request<{ content: string; elements: number }>('/import/redcap', { content, provenance }),
+
+  /** Resolve ontology terms to labels (OLS4, via the sidecar; needs network). */
+  lookupTerms: (terms: string[]) =>
+    request<{ labels: Record<string, string> }>('/terms', { terms }),
 }
 
 /** Parse any dictionary format (CSV / LinkML / dd-json) into a document. */

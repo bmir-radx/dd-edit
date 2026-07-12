@@ -8,21 +8,50 @@
  * carries a "new" chip instead (every field would otherwise be dotted).
  */
 import { marked } from 'marked'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 // The REDCap converter (and hand-written dictionaries) separate paragraphs
 // with single newlines; without breaks, marked would join them into one blob.
 marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
-import { CommitInput, CommitTextarea, CommitWrapInput, TagEditor } from './inputs'
+import { CommitInput, CommitTextarea, CommitWrapInput, StringListEditor } from './inputs'
+import { LINKML_NATIVE, needsIntegerDatatype, preferredDatatype } from './datatypes'
 import { pillColors } from './pillColors'
+import { PreconditionField } from './PreconditionField'
+import { sidecar } from './sidecar'
+import { UCUM_UNITS, ucumSuggestion, ucumUnit } from './ucum'
 import type { DataElement, EnumItem } from './types/document'
 
 /** Pill colors for the value badge over a datatype/cardinality select. */
 function pillStyle(key: 'datatype' | 'cardinality', value: string) {
   const { bg, fg } = pillColors(key, value)
   return { background: bg, color: fg } as const
+}
+
+/**
+ * A small (?) icon in a field label that toggles an inline help note. Inline
+ * (not a hover tooltip) so it can hold a few sentences, survives the panel's
+ * scrolling, and stays up while the user types in the field it explains.
+ */
+function FieldHelp({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        className={`help-dot${open ? ' open' : ''}`}
+        title={open ? 'Hide help' : 'What goes in this field?'}
+        onClick={(e) => {
+          e.preventDefault() // don't let the surrounding <label> grab focus
+          setOpen((o) => !o)
+        }}
+      >
+        ?
+      </button>
+      {open ? <span className="field-help">{children}</span> : null}
+    </>
+  )
 }
 
 type NullableTextKey =
@@ -82,6 +111,10 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
       <section className="card">
         <h3>Identity</h3>
         <label className="field">
+          <span>Section <Dot k="section" /></span>
+          <CommitInput value={text('section')} onCommit={commitNullable('section')} />
+        </label>
+        <label className="field">
           <span>Id (variable name) <Dot k="id" /></span>
           <CommitInput value={element.id} onCommit={commitText('id')} />
         </label>
@@ -90,15 +123,34 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <CommitWrapInput value={element.label} onCommit={commitText('label')} />
         </label>
         <label className="field">
-          <span>Section <Dot k="section" /></span>
-          <CommitInput value={text('section')} onCommit={commitNullable('section')} />
+          <span>
+            Precondition <Dot k="precondition" />
+            <FieldHelp>
+              When this field applies, as a condition over <em>other</em> fields' values —
+              blank means it always applies; when the condition is false the cell must be
+              blank (not applicable). Defined by the Data Dictionary Specification. Predicates:{' '}
+              <code>field = "1"</code>, <code>field &lt;&gt; ""</code> (not blank),{' '}
+              <code>field in {'{'}"1", "2"{'}'}</code>, <code>field contains "3"</code>{' '}
+              (multi-valued fields), and <code>&lt; &lt;= &gt; &gt;=</code> for numeric or
+              date fields. Combine with <code>and</code> / <code>or</code> and parentheses
+              (<code>and</code> binds tighter). Type-ahead offers the legal completions as
+              you type.
+            </FieldHelp>
+          </span>
+          <PreconditionField
+            value={text('precondition')}
+            onCommit={commitNullable('precondition')}
+            elements={doc.elements}
+            selfId={element.id}
+          />
         </label>
         <div className="field">
           <span className="tag-label">Aliases <Dot k="aliases" /></span>
-          <TagEditor
+          <StringListEditor
             values={(element.aliases ?? []) as string[]}
             onChange={(v) => apply((d) => setField(d, index, 'aliases', v))}
-            placeholder="add an alternative id…"
+            placeholder="alternative id"
+            addLabel="+ add alias"
           />
         </div>
       </section>
@@ -107,7 +159,20 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         <h3>Type</h3>
         <div className="row2">
           <label className="field">
-            <span>Datatype <Dot k="datatype" /></span>
+            <span>
+              Datatype <Dot k="datatype" />
+              <FieldHelp>
+                What kind of value the field holds, named per the XSD datatype
+                vocabulary. The <strong>Common</strong> group (<code>string</code>,{' '}
+                <code>integer</code>, <code>decimal</code>, <code>boolean</code>,{' '}
+                <code>date</code>, <code>dateTime</code>, …) maps directly onto schema
+                types and is preferred; everything under <strong>Other</strong> renders
+                as a generated custom type. <code>date_mdy</code> / <code>date_dmy</code>{' '}
+                are slash-formatted dates and <code>timestamp</code> a Unix time — use
+                the native <code>date</code> / <code>dateTime</code> unless the datafile
+                really stores those formats.
+              </FieldHelp>
+            </span>
             <div className="pill-field">
               <select
                 value={element.datatype}
@@ -117,9 +182,16 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
                 {!datatypes.includes(element.datatype) && (
                   <option value={element.datatype}>{element.datatype || '(none)'}</option>
                 )}
-                {datatypes.map((dt) => (
-                  <option key={dt} value={dt}>{dt}</option>
-                ))}
+                <optgroup label="Common">
+                  {datatypes.filter((dt) => LINKML_NATIVE.has(dt)).map((dt) => (
+                    <option key={dt} value={dt}>{dt}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Other">
+                  {datatypes.filter((dt) => !LINKML_NATIVE.has(dt)).map((dt) => (
+                    <option key={dt} value={dt}>{dt}</option>
+                  ))}
+                </optgroup>
               </select>
               <span className="value-pill" style={pillStyle('datatype', element.datatype)}>
                 {element.datatype || '(none)'}
@@ -146,6 +218,22 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             </div>
           </label>
         </div>
+        {preferredDatatype(element.datatype) !== null ? (
+          <div className="fix-hint">
+            <span className="msg">
+              <code>{element.datatype}</code> renders as a generated custom type — preferred:{' '}
+              <code>{preferredDatatype(element.datatype)}</code>.
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                apply((d) => setField(d, index, 'datatype', preferredDatatype(element.datatype)!))
+              }
+            >
+              Use
+            </button>
+          </div>
+        ) : null}
         <label className="check">
           <input
             type="checkbox"
@@ -155,30 +243,53 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           Required <Dot k="required" />
         </label>
         <label className="field">
-          <span>Unit <Dot k="unit" /></span>
-          <CommitInput value={text('unit')} onCommit={commitNullable('unit')} />
+          <span>
+            Unit <Dot k="unit" />
+            <FieldHelp>
+              Units are <strong>UCUM</strong> codes — the Unified Code for Units of Measure
+              (ucum.org), the standard LOINC and FHIR use. Suggestions come from a curated list
+              of codes common in research data; any free text is accepted, but UCUM codes are
+              machine-readable and carry into the LinkML rendering. Codes are case-sensitive:
+              <code>mL</code>, not <code>ml</code>.
+            </FieldHelp>
+          </span>
+          <CommitInput
+            value={text('unit')}
+            onCommit={commitNullable('unit')}
+            list="ucum-units"
+            placeholder="UCUM unit, e.g. mg/dL"
+          />
+          <UnitAssist value={text('unit')} onUse={commitNullable('unit')} />
         </label>
         <label className="field">
           <span>Pattern (regex) <Dot k="pattern" /></span>
           <CommitInput className="mono" value={text('pattern')} onCommit={commitNullable('pattern')} />
         </label>
-        <label className="field">
-          <span>Precondition <Dot k="precondition" /></span>
-          <CommitInput value={text('precondition')} onCommit={commitNullable('precondition')} />
-        </label>
         <div className="field">
           <span className="tag-label">Ontology terms <Dot k="terms" /></span>
-          <TagEditor
+          <TermListEditor
             values={(element.terms ?? []) as string[]}
             onChange={(v) => apply((d) => setField(d, index, 'terms', v))}
-            placeholder="add a term IRI or OBO id…"
-            variant="violet"
           />
         </div>
       </section>
 
       <section className="card">
         <h3>Enumeration <Dot k="enumeration" /></h3>
+        {needsIntegerDatatype(element) ? (
+          <div className="fix-hint">
+            <span className="msg">
+              Values look like integers, but Datatype is{' '}
+              <code>{element.datatype || '(none)'}</code>.
+            </span>
+            <button
+              type="button"
+              onClick={() => apply((d) => setField(d, index, 'datatype', 'integer'))}
+            >
+              Set to integer
+            </button>
+          </div>
+        ) : null}
         <EnumItemsEditor
           items={items('enumeration')}
           onChange={(n) => commitItems('enumeration', n)}
@@ -206,10 +317,11 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         </label>
         <div className="field">
           <span className="tag-label">Example values <Dot k="examples" /></span>
-          <TagEditor
+          <StringListEditor
             values={(element.examples ?? []) as string[]}
             onChange={(v) => apply((d) => setField(d, index, 'examples', v))}
-            placeholder="add an example value…"
+            placeholder="example value"
+            addLabel="+ add example"
           />
         </div>
         <div className="row2">
@@ -224,6 +336,131 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         </div>
       </section>
     </div>
+  )
+}
+
+/** The browseable IRI for a term: OBO CURIEs expand by the PURL rule. */
+function termIri(term: string): string | null {
+  const t = term.trim()
+  if (/^https?:\/\//.test(t)) return t
+  const curie = /^([A-Za-z_][A-Za-z0-9_.-]*):(.+)$/.exec(t)
+  if (curie) return `http://purl.obolibrary.org/obo/${curie[1]}_${curie[2]}`
+  return null
+}
+
+// Term -> resolved label, shared across elements and inspector remounts.
+// null records a finished lookup with no result, so misses aren't re-fetched.
+const termLabels = new Map<string, string | null>()
+
+/**
+ * Ontology terms as a list: an editable identifier per row (IRI or OBO
+ * CURIE), the term's resolved human-readable label under it, and an out-link
+ * to browse the term externally. Labels resolve through the sidecar (OLS4)
+ * and are cached; no network, no label — the list still works.
+ */
+function TermListEditor({
+  values,
+  onChange,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+}) {
+  const [, setResolved] = useState(0) // bump to re-render when lookups land
+
+  useEffect(() => {
+    const missing = values.filter((t) => t.trim() !== '' && !termLabels.has(t.trim()))
+    if (missing.length === 0) return
+    const timer = setTimeout(async () => {
+      try {
+        const res = await sidecar.lookupTerms(missing)
+        for (const t of missing) termLabels.set(t.trim(), res.labels[t.trim()] ?? null)
+      } catch {
+        // Offline / lookup failure: leave uncached so a later edit retries.
+      }
+      setResolved((n) => n + 1)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [values])
+
+  const update = (i: number, v: string) => {
+    const text = v.trim()
+    onChange(
+      text === '' ? values.filter((_, j) => j !== i) : values.map((old, j) => (j === i ? text : old)),
+    )
+  }
+
+  return (
+    <div>
+      {values.map((term, i) => {
+        const iri = termIri(term)
+        const label = termLabels.get(term.trim())
+        return (
+          <div className="term-item" key={i}>
+            <CommitInput
+              className="mono term"
+              value={term}
+              placeholder="IRI or OBO id, e.g. MONDO:0004979"
+              onCommit={(v) => update(i, v)}
+            />
+            <button
+              className="linkout"
+              title={iri ? `Browse ${iri}` : 'Not a resolvable IRI / OBO id'}
+              disabled={iri === null}
+              onClick={() => iri && void window.ddEdit.openExternal(iri)}
+            >
+              ↗
+            </button>
+            <button className="remove" title="Remove" onClick={() => onChange(values.filter((_, j) => j !== i))}>
+              ×
+            </button>
+            {label ? (
+              <div className="term-label">{label}</div>
+            ) : label === null ? (
+              // The lookup finished and found nothing: probably a wrong
+              // prefix or local id (lookup FAILURES stay uncached, not null).
+              <div className="term-label warn">not found in OLS — check the prefix / id</div>
+            ) : null}
+          </div>
+        )
+      })}
+      <button className="add-item" onClick={() => onChange([...values, ''])}>
+        + add term
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Under the Unit field: names a recognized UCUM code, or offers the UCUM
+ * equivalent of an informal spelling ("years" → a) as a one-click fix.
+ * Purely advisory — any free-text unit remains legal. The shared <datalist>
+ * gives the input native autocomplete over the curated UCUM codes.
+ */
+function UnitAssist({ value, onUse }: { value: string; onUse: (unit: string) => void }) {
+  const known = ucumUnit(value)
+  const suggestion = known ? null : ucumSuggestion(value)
+  return (
+    <>
+      <datalist id="ucum-units">
+        {UCUM_UNITS.map((u) => (
+          <option key={u.code} value={u.code}>
+            {u.name}
+          </option>
+        ))}
+      </datalist>
+      {known ? (
+        <div className="unit-hint ok">✓ UCUM: {known.name}</div>
+      ) : suggestion ? (
+        <div className="fix-hint">
+          <span className="msg">
+            UCUM equivalent: <code>{suggestion.code}</code> ({suggestion.name}).
+          </span>
+          <button type="button" onClick={() => onUse(suggestion.code)}>
+            Use
+          </button>
+        </div>
+      ) : null}
+    </>
   )
 }
 

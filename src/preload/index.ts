@@ -7,8 +7,11 @@ contextBridge.exposeInMainWorld('ddEdit', {
   getSidecarInfo: () => ipcRenderer.invoke('sidecar-info'),
   openFile: () => ipcRenderer.invoke('dialog:open'),
   openRedcapFile: () => ipcRenderer.invoke('dialog:open-redcap'),
+  lastFile: () => ipcRenderer.invoke('last-file'),
+  openPath: (path: string) => ipcRenderer.invoke('file:open-path', path),
   chooseSavePath: (defaultName: string) => ipcRenderer.invoke('dialog:save-as', defaultName),
   saveFile: (path: string, content: string) => ipcRenderer.invoke('file:save', path, content),
+  openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   onMenu: (cb: (action: string) => void) => {
     const listener = (_event: unknown, action: string) => cb(action)
     ipcRenderer.on('menu', listener)
