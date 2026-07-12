@@ -21,6 +21,12 @@ export interface EditorState {
   baseline: DdDocument
   /** Absolute path of the file this document was opened from; null = untitled. */
   filePath: string | null
+  /**
+   * For an untitled document produced by an import: the path of the source
+   * file (e.g. the REDCap export), so the UI can name the document after it
+   * instead of a bare "Untitled". Cleared on open and on save.
+   */
+  importedFrom: string | null
   dirty: boolean
   undoStack: DdDocument[]
   redoStack: DdDocument[]
@@ -29,9 +35,15 @@ export interface EditorState {
    * Replace the document wholesale (open / import / new). Resets history.
    * Dirtiness defaults by origin: a pathless document is an import (dirty —
    * it only exists in memory); a document from a file is clean. `dirty`
-   * overrides for File > New (untitled but nothing to lose).
+   * overrides for File > New (untitled but nothing to lose). Imports pass
+   * their source path as `importedFrom` (with filePath null).
    */
-  loadDocument: (doc: DdDocument, filePath: string | null, dirty?: boolean) => void
+  loadDocument: (
+    doc: DdDocument,
+    filePath: string | null,
+    dirty?: boolean,
+    importedFrom?: string | null,
+  ) => void
   /** Apply a pure mutation; a no-op mutation (same reference back) is free. */
   apply: (mutate: (doc: DdDocument) => DdDocument) => void
   undo: () => void
@@ -43,15 +55,17 @@ export const useEditor = create<EditorState>((set, get) => ({
   doc: newDocument(),
   baseline: newDocument(),
   filePath: null,
+  importedFrom: null,
   dirty: false,
   undoStack: [],
   redoStack: [],
 
-  loadDocument: (doc, filePath, dirty) =>
+  loadDocument: (doc, filePath, dirty, importedFrom) =>
     set({
       doc,
       baseline: doc,
       filePath,
+      importedFrom: importedFrom ?? null,
       dirty: dirty ?? filePath === null,
       undoStack: [],
       redoStack: [],
@@ -93,6 +107,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     })
   },
 
-  // Saving establishes the current document as the new baseline.
-  markSaved: (filePath) => set({ filePath, dirty: false, baseline: get().doc }),
+  // Saving establishes the current document as the new baseline (and a real
+  // file association, so any import provenance is spent).
+  markSaved: (filePath) => set({ filePath, importedFrom: null, dirty: false, baseline: get().doc }),
 }))

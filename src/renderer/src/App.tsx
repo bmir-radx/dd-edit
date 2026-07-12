@@ -35,7 +35,7 @@ function baseName(path: string | null): string {
 }
 
 export function App() {
-  const { doc, filePath, dirty, loadDocument, apply, undo, redo, markSaved, undoStack, redoStack } =
+  const { doc, filePath, importedFrom, dirty, loadDocument, apply, undo, redo, markSaved, undoStack, redoStack } =
     useEditor()
   const [status, setStatus] = useState('starting sidecar…')
   const [datatypes, setDatatypes] = useState<string[]>([])
@@ -115,42 +115,50 @@ export function App() {
     setCursorRow(null)
   }, [confirmDiscard, loadDocument])
 
+  // Open a file's content as a dictionary; when parsing fails, fall back to
+  // REDCap import (sniff-and-offer). A CSV that fails dictionary parsing but
+  // imports as REDCap just opens: making the user find Import… first is
+  // hostile. The import stays untitled — REDCap is an import format, not a
+  // save format — but keeps the source path so the UI can name it.
+  const openParsedOrImport = useCallback(
+    async (file: { path: string; content: string }) => {
+      try {
+        loadDocument(await parseToDocument(file.content), file.path)
+        setCursorRow(null)
+      } catch (err) {
+        try {
+          const imported = await sidecar.importRedcap(file.content)
+          loadDocument(JSON.parse(imported.content), null, undefined, file.path)
+          setCursorRow(null)
+          window.alert(
+            `Imported ${baseName(file.path)} as a REDCap export (${imported.elements} fields).\n\n` +
+              `REDCap format cannot be saved back — use Save to write it as a standard ` +
+              `data dictionary (CSV, LinkML YAML, or dd-json).`,
+          )
+        } catch {
+          window.alert(`Could not open ${baseName(file.path)}:\n${err instanceof Error ? err.message : err}`)
+        }
+      }
+    },
+    [loadDocument],
+  )
+
   const doOpen = useCallback(async () => {
     if (!confirmDiscard()) return
     const file = await window.ddEdit.openFile()
     if (!file) return
-    try {
-      loadDocument(await parseToDocument(file.content), file.path)
-      setCursorRow(null)
-    } catch (err) {
-      // A CSV that fails dictionary parsing but imports as REDCap just opens:
-      // making the user find Import… first is hostile. The import is untitled
-      // (REDCap is an import format, not a save format), and we say so.
-      try {
-        const imported = await sidecar.importRedcap(file.content)
-        loadDocument(JSON.parse(imported.content), null)
-        setCursorRow(null)
-        window.alert(
-          `Imported ${baseName(file.path)} as a REDCap export (${imported.elements} fields).\n\n` +
-            `REDCap format cannot be saved back — use Save to write it as a standard ` +
-            `data dictionary (CSV, LinkML YAML, or dd-json).`,
-        )
-      } catch {
-        window.alert(`Could not open ${baseName(file.path)}:\n${err instanceof Error ? err.message : err}`)
-      }
-    }
-  }, [confirmDiscard, loadDocument])
+    await openParsedOrImport(file)
+  }, [confirmDiscard, openParsedOrImport])
 
   const doReopenLast = useCallback(async () => {
     if (!lastFile || !confirmDiscard()) return
     try {
       const file = await window.ddEdit.openPath(lastFile)
-      loadDocument(await parseToDocument(file.content), file.path)
-      setCursorRow(null)
+      await openParsedOrImport(file)
     } catch (err) {
       window.alert(`Could not reopen ${baseName(lastFile)}:\n${err instanceof Error ? err.message : err}`)
     }
-  }, [lastFile, confirmDiscard, loadDocument])
+  }, [lastFile, confirmDiscard, openParsedOrImport])
 
   const doImportRedcap = useCallback(async () => {
     if (!confirmDiscard()) return
@@ -158,7 +166,8 @@ export function App() {
     if (!file) return
     try {
       const imported = await sidecar.importRedcap(file.content)
-      loadDocument(JSON.parse(imported.content), null) // untitled + dirty: an import, not an open
+      // Untitled + dirty: an import, not an open — but named after its source.
+      loadDocument(JSON.parse(imported.content), null, undefined, file.path)
       setCursorRow(null)
     } catch (err) {
       window.alert(`REDCap import failed:\n${err instanceof Error ? err.message : err}`)
@@ -267,10 +276,18 @@ export function App() {
     })()
   }, [])
 
+  // What to call the document: its file name; for an unsaved import, the
+  // source it came from (so a REDCap import isn't a bare "Untitled").
+  const displayName = filePath
+    ? baseName(filePath)
+    : importedFrom
+      ? `${baseName(importedFrom)} (imported)`
+      : 'Untitled'
+
   useEffect(() => {
-    document.title = `${baseName(filePath)}${dirty ? ' •' : ''} — dd-edit`
+    document.title = `${displayName}${dirty ? ' •' : ''} — dd-edit`
     window.ddEdit.setDirty(dirty)
-  }, [filePath, dirty])
+  }, [displayName, dirty])
 
   // -------------------------------------------------------------- layout
 
@@ -292,7 +309,7 @@ export function App() {
     <div className={`app${window.ddEdit.platform === 'darwin' ? ' mac' : ''}`}>
       <header className="toolbar">
         <span className="file-name">
-          {baseName(filePath)}
+          {displayName}
           {dirty ? <span className="dirty-dot"> •</span> : null}
         </span>
         <div className="group">
@@ -409,7 +426,7 @@ export function App() {
                     <PreviewPane
                       format={panelTab}
                       enabled={true}
-                      title={baseName(filePath)}
+                      title={displayName}
                       selectedRows={selectedRows}
                     />
                   )}
