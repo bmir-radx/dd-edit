@@ -213,8 +213,10 @@ def terms(req: TermsRequest):
 @app.post("/validate")
 def validate(req: ValidateRequest):
     # The validator works on the CSV serialization; other formats are
-    # converted first. The generated CSV is deterministic (data row i =
-    # element i), so line numbers map straight back to grid rows.
+    # converted first. Findings carry the format-independent address
+    # (elementIndex = document-order position = grid row) since toolkit
+    # v0.0.6; line numbers remain for the CSV view. getattr keeps a dev
+    # override on an older toolkit from crashing the endpoint.
     kind = _detect(req.content)
     try:
         csv_text = req.content if kind == "csv" else _load(req.content).to_csv()
@@ -230,6 +232,9 @@ def validate(req: ValidateRequest):
                 "line": f.line,
                 "column": f.column,
                 "value": f.value,
+                "elementIndex": getattr(f, "element_index", None),
+                "elementId": getattr(f, "element_id", None),
+                "suggestion": getattr(f, "suggestion", None),
             }
             for f in findings
         ]

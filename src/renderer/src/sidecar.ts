@@ -42,10 +42,18 @@ export interface Finding {
   /** CSV column header name (e.g. "Datatype"), when the finding is cell-scoped. */
   column: string | null
   value: string | null
+  /** Format-independent address: 0-based document-order position = grid row. */
+  elementIndex?: number | null
+  elementId?: string | null
+  /** Machine-usable replacement value, when the check has one. */
+  suggestion?: string | null
 }
 
 /** Grid row index for a finding, or null for file-level findings. */
 export function findingRow(f: Finding): number | null {
+  // Prefer the validator's format-independent address (toolkit ≥ v0.0.6);
+  // the line arithmetic remains as the fallback.
+  if (f.elementIndex !== undefined && f.elementIndex !== null) return f.elementIndex
   return f.line !== null && f.line >= 2 ? f.line - 2 : null
 }
 
