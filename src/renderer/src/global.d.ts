@@ -22,7 +22,7 @@ declare global {
       /** Open an http(s) URL in the system browser. */
       openExternal: (url: string) => Promise<void>
       /** Subscribe to application-menu actions; returns unsubscribe. */
-      onMenu: (cb: (action: string) => void) => () => void
+      onMenu: (cb: (action: string, payload?: string) => void) => () => void
     }
   }
 }

@@ -12,8 +12,8 @@ contextBridge.exposeInMainWorld('ddEdit', {
   chooseSavePath: (defaultName: string) => ipcRenderer.invoke('dialog:save-as', defaultName),
   saveFile: (path: string, content: string) => ipcRenderer.invoke('file:save', path, content),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
-  onMenu: (cb: (action: string) => void) => {
-    const listener = (_event: unknown, action: string) => cb(action)
+  onMenu: (cb: (action: string, payload?: string) => void) => {
+    const listener = (_event: unknown, action: string, payload?: string) => cb(action, payload)
     ipcRenderer.on('menu', listener)
     return () => {
       ipcRenderer.removeListener('menu', listener)

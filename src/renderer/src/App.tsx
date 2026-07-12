@@ -149,15 +149,23 @@ export function App() {
     await openParsedOrImport(file)
   }, [confirmDiscard, openParsedOrImport])
 
+  // Open a known path (welcome-screen reopen button, Open Recent menu).
+  const doOpenPath = useCallback(
+    async (path: string) => {
+      if (!confirmDiscard()) return
+      try {
+        const file = await window.ddEdit.openPath(path)
+        await openParsedOrImport(file)
+      } catch (err) {
+        window.alert(`Could not open ${baseName(path)}:\n${err instanceof Error ? err.message : err}`)
+      }
+    },
+    [confirmDiscard, openParsedOrImport],
+  )
+
   const doReopenLast = useCallback(async () => {
-    if (!lastFile || !confirmDiscard()) return
-    try {
-      const file = await window.ddEdit.openPath(lastFile)
-      await openParsedOrImport(file)
-    } catch (err) {
-      window.alert(`Could not reopen ${baseName(lastFile)}:\n${err instanceof Error ? err.message : err}`)
-    }
-  }, [lastFile, confirmDiscard, openParsedOrImport])
+    if (lastFile) await doOpenPath(lastFile)
+  }, [lastFile, doOpenPath])
 
   const doImportRedcap = useCallback(async () => {
     if (!confirmDiscard()) return
@@ -219,10 +227,11 @@ export function App() {
 
   // ------------------------------------------------------- menu wiring
 
-  const handlers = useRef<Record<string, () => void>>({})
+  const handlers = useRef<Record<string, (payload?: string) => void>>({})
   handlers.current = {
     new: doNew,
     open: () => void doOpen(),
+    'open-recent': (path) => void (path && doOpenPath(path)),
     save: () => void doSave(),
     'save-as': () => void doSaveAs(),
     'import-redcap': () => void doImportRedcap(),
@@ -231,7 +240,7 @@ export function App() {
   }
 
   useEffect(() => {
-    return window.ddEdit.onMenu((action) => handlers.current[action]?.())
+    return window.ddEdit.onMenu((action, payload) => handlers.current[action]?.(payload))
   }, [])
 
   // Cmd/Ctrl+F opens the grid's search overlay.

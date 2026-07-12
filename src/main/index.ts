@@ -110,7 +110,11 @@ const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
 interface Settings {
   lastDir?: string
   lastFile?: string
+  /** Most recent first, existing-at-open-time, capped. */
+  recentFiles?: string[]
 }
+
+const RECENT_FILES_MAX = 10
 let settings: Settings | null = null
 
 async function getSettings(): Promise<Settings> {
@@ -142,7 +146,12 @@ async function rememberFile(filePath: string): Promise<void> {
   const s = await getSettings()
   s.lastDir = path.dirname(filePath)
   s.lastFile = filePath
+  s.recentFiles = [filePath, ...(s.recentFiles ?? []).filter((f) => f !== filePath)].slice(
+    0,
+    RECENT_FILES_MAX,
+  )
   await saveSettings()
+  buildMenu() // refresh the Open Recent submenu
 }
 
 async function openAndRead(filters: typeof DICTIONARY_FILTERS, remember = false) {
@@ -198,8 +207,35 @@ ipcMain.handle('shell:open-external', async (_event, url: string) => {
 
 // ----------------------------------------------------------------- menu
 
-function sendMenu(action: string): void {
-  BrowserWindow.getFocusedWindow()?.webContents.send('menu', action)
+function sendMenu(action: string, payload?: string): void {
+  BrowserWindow.getFocusedWindow()?.webContents.send('menu', action, payload)
+}
+
+/** The File ▸ Open Recent submenu, from the (cached) settings. */
+function recentFilesSubmenu(): MenuItemConstructorOptions[] {
+  const home = app.getPath('home')
+  const recents = (settings?.recentFiles ?? []).filter((f) => existsSync(f))
+  if (recents.length === 0) {
+    return [{ label: 'No Recent Files', enabled: false }]
+  }
+  return [
+    ...recents.map<MenuItemConstructorOptions>((f) => ({
+      label: f.startsWith(home) ? `~${f.slice(home.length)}` : f,
+      click: () => sendMenu('open-recent', f),
+    })),
+    { type: 'separator' },
+    {
+      label: 'Clear Menu',
+      click: () => {
+        void (async () => {
+          const s = await getSettings()
+          s.recentFiles = []
+          await saveSettings()
+          buildMenu()
+        })()
+      },
+    },
+  ]
 }
 
 function buildMenu(): void {
@@ -210,6 +246,7 @@ function buildMenu(): void {
       submenu: [
         { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new') },
         { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => sendMenu('open') },
+        { label: 'Open Recent', submenu: recentFilesSubmenu() },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenu('save') },
         { label: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', click: () => sendMenu('save-as') },
@@ -276,6 +313,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  await getSettings() // populate the cache so Open Recent fills on first build
   buildMenu()
   try {
     await startSidecar()
