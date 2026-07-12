@@ -41,7 +41,7 @@ The grid works the way a spreadsheet does. Click a cell to edit it in place,
 copy and paste ranges to and from Excel or Google Sheets, drag the fill
 handle to repeat a value down a column, and drag rows to reorder them. Add an
 element with the row at the bottom of the grid; undo and redo work for every
-change (⌘Z / ⇧⌘Z).
+change (⌘Z / ⇧⌘Z); search the grid with ⌘F or the toolbar's Search button.
 
 Two kinds of problem have a suggested correction shown directly in the cell:
 a unit written informally where a standard code exists, and an enumeration
@@ -119,7 +119,7 @@ packages for conversion, validation, rendering, and REDCap import — see
 one command.
 
 ```sh
-# 1. Python sidecar
+# 1. Python sidecar (on Windows, the venv's pip is .venv\Scripts\pip)
 cd sidecar
 python -m venv .venv && .venv/bin/pip install -e ".[test]"
 cd ..
@@ -154,6 +154,7 @@ tab) builds all three and uploads them as artifacts.
 
 Builds are unsigned for now: the first launch needs right-click → Open on
 macOS (Gatekeeper), or "More info" → "Run anyway" on Windows (SmartScreen).
+On Linux, mark the AppImage executable first (`chmod +x dd-edit-*.AppImage`).
 
 ## License
 
