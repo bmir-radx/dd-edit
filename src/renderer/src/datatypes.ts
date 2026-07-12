@@ -25,17 +25,26 @@ export const LINKML_NATIVE = new Set([
  * to their semantic native type. Every non-native name has an entry, so the
  * inspector can always say what it would rather see.
  */
+// Aliases map onto a builtin range 1:1 — the name only records storage width
+// or lexical class (int vs integer), and the schema silently uses the
+// semantic type anyway.
 const XSD_INTEGERS = [
   'int', 'short', 'byte', 'long',
   'nonNegativeInteger', 'nonPositiveInteger', 'negativeInteger', 'positiveInteger',
   'unsignedLong', 'unsignedInt', 'unsignedShort', 'unsignedByte',
 ]
-const XSD_STRINGS = [
+const XSD_STRING_ALIASES = [
   'normalizedString', 'token', 'language', 'Name', 'NCName', 'NMTOKEN', 'NMTOKENS', 'QName',
+]
+export const ALIAS_DATATYPES = new Set([...XSD_INTEGERS, ...XSD_STRING_ALIASES])
+
+// These have no builtin range: the schema emits a generated custom type.
+const XSD_CUSTOM_STRINGS = [
   'gYearMonth', 'gYear', 'gMonthDay', 'gDay', 'gMonth',
   'duration', 'hexBinary', 'base64Binary', 'NOTATION',
   'ID', 'IDREF', 'IDREFS', 'ENTITY', 'ENTITIES',
 ]
+const XSD_STRINGS = [...XSD_STRING_ALIASES, ...XSD_CUSTOM_STRINGS]
 
 export const PREFERRED_DATATYPE: Record<string, string> = {
   ...Object.fromEntries(XSD_INTEGERS.map((n) => [n, 'integer'])),

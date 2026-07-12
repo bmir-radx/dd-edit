@@ -16,7 +16,7 @@ marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea, CommitWrapInput, StringListEditor } from './inputs'
-import { LINKML_NATIVE, needsIntegerDatatype, preferredDatatype, wantsUnit } from './datatypes'
+import { ALIAS_DATATYPES, LINKML_NATIVE, needsIntegerDatatype, preferredDatatype, wantsUnit } from './datatypes'
 import { idNeedsCleanup, sanitizeId } from './ids'
 import { pillColors } from './pillColors'
 import { PreconditionField } from './PreconditionField'
@@ -234,8 +234,17 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         {preferredDatatype(element.datatype) !== null ? (
           <div className="fix-hint">
             <span className="msg">
-              <code>{element.datatype}</code> renders as a generated custom type — preferred:{' '}
-              <code>{preferredDatatype(element.datatype)}</code>.
+              {ALIAS_DATATYPES.has(element.datatype) ? (
+                <>
+                  <code>{element.datatype}</code> names a storage width, not a meaning — the
+                  semantic type is <code>{preferredDatatype(element.datatype)}</code>.
+                </>
+              ) : (
+                <>
+                  <code>{element.datatype}</code> renders as a generated custom type —
+                  preferred: <code>{preferredDatatype(element.datatype)}</code>.
+                </>
+              )}
             </span>
             <button
               type="button"
@@ -458,6 +467,10 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
   const [hi, setHi] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const hiRef = useRef<HTMLDivElement>(null)
+  // accept() blurs, and the blur commit runs with this render's (stale)
+  // draft — without this guard it overwrites the accepted code with the
+  // typed fragment (or clears it when nothing was typed).
+  const justAccepted = useRef(false)
   useEffect(() => {
     setDraft(value)
   }, [value])
@@ -474,6 +487,7 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
   ).slice(0, 40)
 
   const accept = (code: string) => {
+    justAccepted.current = true
     setDraft(code)
     setOpen(false)
     if (code !== value) onCommit(code)
@@ -481,6 +495,10 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
   }
   const commit = () => {
     setOpen(false)
+    if (justAccepted.current) {
+      justAccepted.current = false
+      return
+    }
     if (draft.trim() !== value) onCommit(draft.trim())
   }
 
