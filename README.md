@@ -12,10 +12,9 @@ REDCap data dictionary exports import directly.
 **Status: working editor.** Milestones 1–4 of the [design](DESIGN.md) are in
 place — the app opens, edits, validates, and saves real dictionaries:
 
-- **Spreadsheet grid** ([Glide Data Grid](https://github.com/glideapps/glide-data-grid)):
-  inline editing, fill handle, range selection, TSV copy/paste that
-  interoperates with Excel/Sheets, row add/delete/drag-reorder, and undo/redo
-  over the document model.
+- **Spreadsheet grid**: inline editing, fill handle, range selection, TSV
+  copy/paste that interoperates with Excel/Sheets, row add/delete/drag-reorder,
+  and undo/redo over the document model.
 - **Element inspector**: structured editing of every field — a precondition
   editor with grammar type-ahead and a live read-back of the parsed
   expression, datatype/cardinality pickers, UCUM unit assistance,
@@ -80,3 +79,24 @@ the first launch needs right-click → Open to satisfy Gatekeeper.
 ## License
 
 [BSD 2-Clause](LICENSE).
+
+## Acknowledgements
+
+dd-edit stands on:
+
+- [Glide Data Grid](https://github.com/glideapps/glide-data-grid) — the
+  canvas-based spreadsheet grid at the heart of the editor.
+- [Electron](https://www.electronjs.org),
+  [electron-vite](https://electron-vite.org),
+  [electron-builder](https://www.electron.build),
+  [React](https://react.dev), and [Zustand](https://zustand-demo.pmnd.rs) —
+  the app shell, tooling, and state.
+- [FastAPI](https://fastapi.tiangolo.com) and
+  [Uvicorn](https://www.uvicorn.org) — the Python sidecar — bundled for
+  distribution with [PyInstaller](https://pyinstaller.org).
+- [LinkML](https://linkml.io) — the schema language the toolkit renders
+  dictionaries into.
+- [marked](https://marked.js.org) — Markdown rendering for descriptions.
+- [EMBL-EBI OLS4](https://www.ebi.ac.uk/ols4/) — ontology term label lookups.
+- [UCUM](https://ucum.org) — the unit vocabulary behind the Unit field's
+  assistance.
