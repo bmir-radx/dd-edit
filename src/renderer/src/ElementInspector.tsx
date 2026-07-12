@@ -8,7 +8,7 @@
  * carries a "new" chip instead (every field would otherwise be dotted).
  */
 import { marked } from 'marked'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 // The REDCap converter (and hand-written dictionaries) separate paragraphs
 // with single newlines; without breaks, marked would join them into one blob.
@@ -266,12 +266,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
               <code>mL</code>, not <code>ml</code>.
             </FieldHelp>
           </span>
-          <CommitInput
-            value={text('unit')}
-            onCommit={commitNullable('unit')}
-            list="ucum-units"
-            placeholder="UCUM unit, e.g. mg/dL"
-          />
+          <UnitInput value={text('unit')} onCommit={commitNullable('unit')} />
           <UnitAssist value={text('unit')} onUse={commitNullable('unit')} />
           {wantsUnit(element) ? (
             // Deliberately quiet (not amber): counts and scores are
@@ -452,6 +447,109 @@ function TermListEditor({
 }
 
 /**
+ * The Unit input: a combobox over the curated UCUM subset (filter by code or
+ * name), replacing the native datalist so the dropdown can SAY it's a small
+ * subset — with a datalist, the list read as the complete vocabulary. Commit
+ * semantics match CommitInput (blur/Enter = one undo step; Escape reverts).
+ */
+function UnitInput({ value, onCommit }: { value: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const hiRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+  useEffect(() => {
+    hiRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [hi, open])
+
+  const needle = draft.trim().toLowerCase()
+  const items = UCUM_UNITS.filter(
+    (u) =>
+      needle === '' ||
+      u.code.toLowerCase().includes(needle) ||
+      u.name.toLowerCase().includes(needle),
+  ).slice(0, 40)
+
+  const accept = (code: string) => {
+    setDraft(code)
+    setOpen(false)
+    if (code !== value) onCommit(code)
+    inputRef.current?.blur()
+  }
+  const commit = () => {
+    setOpen(false)
+    if (draft.trim() !== value) onCommit(draft.trim())
+  }
+
+  return (
+    <div className="pc-wrap">
+      <input
+        ref={inputRef}
+        type="text"
+        value={draft}
+        placeholder="UCUM unit, e.g. mg/dL"
+        onChange={(e) => {
+          setDraft(e.target.value)
+          setOpen(true)
+          setHi(0)
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (open && items.length > 0) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              setHi((h) => (h + 1) % items.length)
+              return
+            }
+            if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setHi((h) => (h - 1 + items.length) % items.length)
+              return
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+              e.preventDefault()
+              accept(items[Math.min(hi, items.length - 1)].code)
+              return
+            }
+            if (e.key === 'Escape') {
+              setOpen(false)
+              return
+            }
+          }
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') setDraft(value)
+        }}
+      />
+      {open && items.length > 0 ? (
+        <div className="pc-suggest">
+          <div className="suggest-note">
+            Common UCUM units — a small subset; any UCUM code or free text is valid
+          </div>
+          {items.map((u, i) => (
+            <div
+              key={u.code}
+              ref={i === hi ? hiRef : undefined}
+              className={`pc-item${i === hi ? ' hi' : ''}`}
+              onPointerDown={(e) => {
+                e.preventDefault() // keep focus; no blur-commit race
+                accept(u.code)
+              }}
+            >
+              <span className="main value">{u.code}</span>
+              <span className="detail">{u.name}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * Under the Unit field: names a recognized UCUM code, or offers the UCUM
  * equivalent of an informal spelling ("years" → a) as a one-click fix.
  * Purely advisory — any free-text unit remains legal. The shared <datalist>
@@ -462,13 +560,6 @@ function UnitAssist({ value, onUse }: { value: string; onUse: (unit: string) => 
   const suggestion = known ? null : ucumSuggestion(value)
   return (
     <>
-      <datalist id="ucum-units">
-        {UCUM_UNITS.map((u) => (
-          <option key={u.code} value={u.code}>
-            {u.name}
-          </option>
-        ))}
-      </datalist>
       {known ? (
         <div className="unit-hint ok">✓ UCUM: {known.name}</div>
       ) : suggestion ? (

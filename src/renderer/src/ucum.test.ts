@@ -54,6 +54,40 @@ describe('ucumSuggestion', () => {
     expect(ucumSuggestion('years')?.name).toBe('year')
   })
 
+  it('composes "per X" into a rate code', () => {
+    expect(ucumSuggestion('per year')?.code).toBe('/a')
+    expect(ucumSuggestion('Per Month')?.code).toBe('/mo')
+    expect(ucumSuggestion('per annum')?.code).toBe('/a')
+    expect(ucumSuggestion('per year')?.name).toBe('per year')
+  })
+
+  it('composes "X per Y" from resolvable parts', () => {
+    expect(ucumSuggestion('mg per dl')?.code).toBe('mg/dL')
+    expect(ucumSuggestion('beats per minute')?.code).toBe('{beats}/min')
+    expect(ucumSuggestion('stones per fortnight')).toBeNull() // unresolvable parts
+  })
+
+  it('resolves slash compounds of informal tokens', () => {
+    expect(ucumSuggestion('mcg/ml')?.code).toBe('ug/mL')
+  })
+
+  it('normalizes trailing periods and repeated spaces', () => {
+    expect(ucumSuggestion('hr.')?.code).toBe('h')
+    expect(ucumSuggestion('per  year')?.code).toBe('/a')
+  })
+
+  it('handles misprints, regional spellings, and micro-sign variants', () => {
+    expect(ucumSuggestion('millimetres')?.code).toBe('mm')
+    expect(ucumSuggestion('gm')?.code).toBe('g')
+    expect(ucumSuggestion('µg')?.code).toBe('ug')
+    expect(ucumSuggestion('kg/m²')?.code).toBe('kg/m2')
+  })
+
+  it('the composed rate codes are themselves curated', () => {
+    expect(ucumUnit('/a')?.name).toBe('per year')
+    expect(ucumUnit('/mo')?.name).toBe('per month')
+  })
+
   it('every informal mapping target resolves to a curated unit or itself', () => {
     // A suggestion always renders with a name; the fallback path
     // ({ code, name: code }) is only for codes outside the curated list.

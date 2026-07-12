@@ -66,6 +66,9 @@ export const UCUM_UNITS: UcumUnit[] = [
   { code: '/h', name: 'per hour' },
   { code: '/d', name: 'per day' },
   { code: '/wk', name: 'per week' },
+  { code: '/mo', name: 'per month' },
+  { code: '/a', name: 'per year' },
+  { code: '/s', name: 'per second' },
   { code: '{beats}/min', name: 'beats per minute' },
   { code: '{breaths}/min', name: 'breaths per minute' },
   { code: 'mL/min', name: 'milliliter per minute' },
@@ -120,25 +123,106 @@ const INFORMAL: Record<string, string> = {
   iu: '[IU]',
   meters: 'm', meter: 'm', metres: 'm', metre: 'm',
   centimeters: 'cm', centimeter: 'cm',
+  // rate words and "per …" phrasings (also handled compositionally below)
+  'per annum': '/a', yearly: '/a', annually: '/a',
+  monthly: '/mo', weekly: '/wk', daily: '/d', hourly: '/h',
+  'beats/min': '{beats}/min', 'breaths/min': '{breaths}/min',
+  // common misprints / regional spellings
+  'years old': 'a',
+  millimeters: 'mm', millimeter: 'mm', millimetres: 'mm', millimetre: 'mm',
+  milimeter: 'mm', milimeters: 'mm',
+  centimetres: 'cm', centimetre: 'cm',
+  kilometers: 'km', kilometer: 'km', kilometres: 'km', kilometre: 'km',
+  millilitres: 'mL', millilitre: 'mL', mililiter: 'mL', mililiters: 'mL',
+  deciliter: 'dL', deciliters: 'dL', decilitre: 'dL', decilitres: 'dL',
+  microliter: 'uL', microliters: 'uL', microlitre: 'uL', microlitres: 'uL',
+  nanogram: 'ng', nanograms: 'ng',
+  gramme: 'g', grammes: 'g', gm: 'g', gms: 'g',
+  kilogramme: 'kg', kilogrammes: 'kg',
+  mgs: 'mg', ltr: 'L',
+  'degrees celsius': 'Cel', 'degrees fahrenheit': '[degF]',
+  'per cent': '%', percentage: '%',
+  // micro-sign variants (both U+00B5 and U+03BC show up in pasted data)
+  µg: 'ug', μg: 'ug', 'µg/ml': 'ug/mL', 'μg/ml': 'ug/mL',
+  µl: 'uL', μl: 'uL', 'µmol/l': 'umol/L', 'μmol/l': 'umol/L',
+  // exponent notations
+  m2: 'm2', 'm^2': 'm2', 'm²': 'm2', 'kg/m^2': 'kg/m2', 'kg/m²': 'kg/m2',
   // case fixes — UCUM is case-sensitive, and these get typed lowercase a lot
   // (a correctly-cased value lowercases onto itself and yields no suggestion)
   l: 'L', ml: 'mL', dl: 'dL', ul: 'uL',
   'mg/dl': 'mg/dL', 'g/dl': 'g/dL', 'g/l': 'g/L',
   'mmol/l': 'mmol/L', 'mol/l': 'mol/L', 'umol/l': 'umol/L',
   'ng/ml': 'ng/mL', 'ug/ml': 'ug/mL', 'pg/ml': 'pg/mL',
-  'meq/l': 'mEq/L', 'u/l': 'U/L',
+  'meq/l': 'mEq/L', 'u/l': 'U/L', 'iu/l': '[IU]/L', 'iu/ml': '[IU]/mL',
   cel: 'Cel', kpa: 'kPa',
+}
+
+// Case-insensitive code lookup, for token resolution ("ML" -> mL).
+const CODE_BY_LOWER = new Map<string, string>()
+for (const u of UCUM_UNITS) {
+  if (!CODE_BY_LOWER.has(u.code.toLowerCase())) CODE_BY_LOWER.set(u.code.toLowerCase(), u.code)
+}
+
+// A curated unit's human-readable name is itself a common way to write the
+// unit ("beats per minute", "millimeter of mercury") — resolve those too.
+const CODE_BY_NAME = new Map<string, string>()
+for (const u of UCUM_UNITS) {
+  if (!CODE_BY_NAME.has(u.name.toLowerCase())) CODE_BY_NAME.set(u.name.toLowerCase(), u.code)
+}
+
+/** Resolve one token (a code, an informal spelling, or a miscased code). */
+function resolveUnitToken(token: string): UcumUnit | null {
+  const t = token.trim()
+  if (t === '') return null
+  const exact = BY_CODE.get(t)
+  if (exact !== undefined) return exact
+  const informal = INFORMAL[t.toLowerCase()]
+  if (informal !== undefined) return BY_CODE.get(informal) ?? { code: informal, name: informal }
+  const ci = CODE_BY_LOWER.get(t.toLowerCase())
+  return ci !== undefined ? (BY_CODE.get(ci) ?? null) : null
+}
+
+/** Prefer the curated entry for a composed code; else synthesize one. */
+function composed(code: string, name: string): UcumUnit {
+  return BY_CODE.get(code) ?? { code, name }
 }
 
 /**
  * A UCUM suggestion for an informal unit spelling, or null when the value is
  * already the suggested code / has no known mapping. Case-insensitive on the
- * informal side (UCUM itself is case-sensitive, e.g. mL vs ml).
+ * informal side (UCUM itself is case-sensitive, e.g. mL vs ml). Beyond the
+ * spelling table, three compositional shapes resolve from their parts:
+ * "per year" → /a, "mg per dl" → mg/dL, and slash compounds of informal
+ * tokens ("mcg/ml" → ug/mL).
  */
 export function ucumSuggestion(value: string): UcumUnit | null {
   const raw = value.trim()
   if (raw === '') return null
-  const code = INFORMAL[raw.toLowerCase()]
-  if (code === undefined || code === raw) return null
-  return BY_CODE.get(code) ?? { code, name: code }
+  // Normalize the noise misprints share: trailing periods ("hr."), runs of
+  // whitespace. The original text still decides the ≠-suggestion guard.
+  const norm = raw.replace(/\.+$/, '').replace(/\s+/g, ' ')
+  const lower = norm.toLowerCase()
+
+  let unit: UcumUnit | null = null
+  const direct = INFORMAL[lower] ?? CODE_BY_NAME.get(lower)
+  if (direct !== undefined) {
+    unit = BY_CODE.get(direct) ?? { code: direct, name: direct }
+  } else if (lower.startsWith('per ')) {
+    const base = resolveUnitToken(norm.slice(4))
+    if (base !== null) unit = composed(`/${base.code}`, `per ${base.name}`)
+  } else {
+    const perParts = norm.split(/ per /i)
+    const slashParts = norm.split('/')
+    const parts = perParts.length === 2 ? perParts : slashParts.length === 2 ? slashParts : null
+    if (parts !== null) {
+      const left = resolveUnitToken(parts[0])
+      const right = resolveUnitToken(parts[1])
+      if (left !== null && right !== null) {
+        unit = composed(`${left.code}/${right.code}`, `${left.name} per ${right.name}`)
+      }
+    }
+  }
+
+  if (unit === null || unit.code === raw) return null
+  return unit
 }

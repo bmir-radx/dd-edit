@@ -551,6 +551,18 @@ button.toggled {
   max-height: 220px;
   overflow: auto;
 }
+/* Header row of a suggestion dropdown: says what the list is (and isn't). */
+.pc-suggest .suggest-note {
+  position: sticky;
+  top: 0;
+  padding: 5px 10px;
+  background: #f6f8fa;
+  border-bottom: 1px solid var(--border);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
 .pc-item {
   display: flex;
   align-items: baseline;
