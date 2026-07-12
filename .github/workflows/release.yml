@@ -20,6 +20,8 @@ jobs:
             builder_args: --mac
           - os: windows-latest
             builder_args: --win
+          - os: ubuntu-latest
+            builder_args: --linux
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out code
@@ -78,4 +80,5 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.exe
+            release/*.AppImage
           if-no-files-found: error

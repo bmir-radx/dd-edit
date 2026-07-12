@@ -26,7 +26,14 @@ win:
   # NSIS installer, unsigned for now: SmartScreen will warn on first run
   # ("More info" > "Run anyway"). The Windows sidecar binary must be built
   # ON Windows (PyInstaller does not cross-compile) — see the Release
-  # Installers workflow, which builds both platforms.
+  # Installers workflow, which builds every platform.
   target:
     - target: nsis
+linux:
+  # AppImage: single-file, runs on any distribution, no packaging metadata
+  # required. As with Windows, the Linux sidecar binary must be built on
+  # Linux — the Release Installers workflow covers it.
+  category: Development
+  target:
+    - target: AppImage
 npmRebuild: false

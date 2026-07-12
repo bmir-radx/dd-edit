@@ -13,10 +13,10 @@ directly.
 ## Getting the app
 
 There are no published releases yet. Installers — a DMG for macOS, an NSIS
-installer for Windows — can be built with `npm run dist` (see
-[Packaging](#packaging)) or downloaded as artifacts of the **Release
-Installers** workflow on the repository's Actions tab. Alternatively, run
-from source (see [Development](#development)).
+installer for Windows, an AppImage for Linux — can be built with
+`npm run dist` (see [Packaging](#packaging)) or downloaded as artifacts of
+the **Release Installers** workflow on the repository's Actions tab.
+Alternatively, run from source (see [Development](#development)).
 
 ## Opening a dictionary
 
@@ -145,12 +145,12 @@ npm run dist
 
 `npm run dist` builds the app bundles, the PyInstaller one-dir sidecar
 (`sidecar/build_binary.py`), and installers in `release/` for the platform
-you are on — DMG + zip on macOS, an NSIS installer on Windows. The sidecar
-ships inside the app as an extra resource and is spawned from there when the
-app is packaged. PyInstaller does not cross-compile, so each platform's
-installer must be built on that platform; the **Release Installers** GitHub
-Actions workflow (run it from the Actions tab) builds both macOS and Windows
-installers and uploads them as artifacts.
+you are on — DMG + zip on macOS, an NSIS installer on Windows, an AppImage
+on Linux. The sidecar ships inside the app as an extra resource and is
+spawned from there when the app is packaged. PyInstaller does not
+cross-compile, so each platform's installer must be built on that platform;
+the **Release Installers** GitHub Actions workflow (run it from the Actions
+tab) builds all three and uploads them as artifacts.
 
 Builds are unsigned for now: the first launch needs right-click → Open on
 macOS (Gatekeeper), or "More info" → "Run anyway" on Windows (SmartScreen).
