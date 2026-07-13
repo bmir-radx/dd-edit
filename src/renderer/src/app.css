@@ -111,7 +111,19 @@ button.primary:hover { filter: brightness(1.08); }
 
 /* Grouped repetitive checks inside the problems list. */
 .problem-group .group-head .msg .count { font-weight: 600; }
-.problem-group .group-head .chevron { color: var(--text-dim); margin-left: 6px; }
+.problem-group .group-head .chevron {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  text-align: center;
+  transition: transform 0.12s ease;
+  /* rows align items to the top; keep the triangle on the first text line */
+  margin-top: 3px;
+}
+.problem-group .group-head .chevron.open { transform: rotate(90deg); }
+.problem-group .group-head:hover .chevron { color: var(--text); }
 .problem-group .group-body {
   border-left: 3px solid var(--border);
   margin-left: 14px;

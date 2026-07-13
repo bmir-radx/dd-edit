@@ -131,6 +131,9 @@ export function ProblemsPanel({
               }
               title={check}
             >
+              {/* Disclosure triangle on the left, IDE-tree style — it IS the
+                  affordance, so it gets real size. */}
+              <span className={`chevron${open ? ' open' : ''}`}>▶</span>
               <span className="badge">
                 <LevelIcon level={fs[0].level} />
               </span>
@@ -140,7 +143,6 @@ export function ProblemsPanel({
                 </span>
                 <span className="where">{fs[0].message}</span>
               </span>
-              <span className="chevron">{open ? '▾' : '▸'}</span>
             </button>
             {open ? <div className="group-body">{fs.map((f, j) => problemRow(f, j))}</div> : null}
           </div>
