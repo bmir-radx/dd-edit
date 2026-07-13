@@ -553,8 +553,24 @@ export function App() {
             row {cursorRow + 1}: <code>{doc.elements[cursorRow].id || '(no id)'}</code>
           </span>
         ) : null}
-        {errorCount > 0 ? <span className="stat-err">{errorCount} errors</span> : null}
-        {warningCount > 0 ? <span className="stat-warn">{warningCount} warnings</span> : null}
+        {errorCount > 0 ? (
+          <button
+            className="stat-link stat-err"
+            onClick={() => setProblemsOpen(true)}
+            title="Open the problems panel"
+          >
+            {errorCount} {errorCount === 1 ? 'error' : 'errors'}
+          </button>
+        ) : null}
+        {warningCount > 0 ? (
+          <button
+            className="stat-link stat-warn"
+            onClick={() => setProblemsOpen(true)}
+            title="Open the problems panel"
+          >
+            {warningCount} {warningCount === 1 ? 'warning' : 'warnings'}
+          </button>
+        ) : null}
         <span className="spacer" />
         <span>{status}</span>
       </footer>

@@ -924,6 +924,15 @@ button.toggled {
 
 .statusbar .stat-err { color: var(--danger); }
 .statusbar .stat-warn { color: #b7791f; }
+/* The counts open the problems dock: button chrome off, link affordance on. */
+.statusbar .stat-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar .stat-link:hover { text-decoration: underline; background: transparent; }
 
 .section-jump {
   font: inherit;
