@@ -655,13 +655,15 @@ button.toggled {
   font-size: 11px;
 }
 
-/* Header row of a suggestion dropdown: says what the list is (and isn't). */
-.pc-suggest .suggest-note {
+/* Footer of a suggestion dropdown: says what the list is (and isn't).
+   Bottom-stuck on a grey band, in both the inspector's dropdown and the
+   grid's in-cell editor. */
+.suggest-note {
   position: sticky;
-  top: 0;
+  bottom: 0;
   padding: 5px 10px;
   background: #f6f8fa;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--text-dim);

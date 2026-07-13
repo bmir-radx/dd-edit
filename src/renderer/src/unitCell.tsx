@@ -132,9 +132,6 @@ export const unitCellRenderer: CustomRenderer<UnitCell> = {
           />
           {open && items.length > 0 ? (
             <div className="unit-suggest">
-              <div className="suggest-note">
-                Common UCUM units — a small subset; any UCUM code or free text is valid
-              </div>
               {items.map((u, i) => (
                 <div
                   key={u.code}
@@ -152,6 +149,9 @@ export const unitCellRenderer: CustomRenderer<UnitCell> = {
                   <span className="code">{u.code}</span>
                 </div>
               ))}
+              <div className="suggest-note">
+                Common UCUM units — a small subset; any UCUM code or free text is valid
+              </div>
             </div>
           ) : null}
         </div>

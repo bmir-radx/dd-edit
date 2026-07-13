@@ -584,9 +584,6 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
       />
       {open && items.length > 0 ? (
         <div className="pc-suggest">
-          <div className="suggest-note">
-            Common UCUM units — a small subset; any UCUM code or free text is valid
-          </div>
           {items.map((u, i) => (
             <div
               key={u.code}
@@ -602,6 +599,9 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
               <span className="detail code">{u.code}</span>
             </div>
           ))}
+          <div className="suggest-note">
+            Common UCUM units — a small subset; any UCUM code or free text is valid
+          </div>
         </div>
       ) : null}
     </div>
