@@ -64,8 +64,59 @@ button.primary:hover { filter: brightness(1.08); }
 
 /* --------------------------------------------------------------- main */
 
-.main { flex: 1; display: flex; min-height: 0; }
+/* Column: the working row (grid + right panel) above the problems dock. */
+.main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.work-row { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .grid-host { flex: 1; min-width: 0; }
+
+/* ------------------------------------------------------- problems dock */
+
+.problems-dock {
+  position: relative;               /* anchors the resize handle */
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+.dock-resizer {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 10;
+}
+.dock-resizer:hover { background: var(--accent); opacity: 0.35; }
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+}
+.dock-head .dock-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.dock-head .spacer { flex: 1; }
+.dock-head .dock-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+.dock-head .dock-close:hover { color: var(--text); background: transparent; }
+.dock-body { flex: 1; overflow: auto; min-height: 0; }
+
+/* Grouped repetitive checks inside the problems list. */
+.problem-group .group-head .msg .count { font-weight: 600; }
+.problem-group .group-head .chevron { color: var(--text-dim); margin-left: 6px; }
+.problem-group .group-body {
+  border-left: 3px solid var(--border);
+  margin-left: 14px;
+}
+.problem-summary .info { color: var(--text-dim); }
 
 /* --------------------------------------------------------- right panel */
 

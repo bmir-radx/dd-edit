@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LINKML_NATIVE, needsIntegerDatatype, preferredDatatype } from './datatypes'
+import { HARMONIZATION_TARGET, LINKML_NATIVE, needsIntegerDatatype, preferredDatatype } from './datatypes'
 
 describe('preferredDatatype', () => {
   it('returns null for LinkML-native datatypes', () => {
@@ -24,21 +24,29 @@ describe('preferredDatatype', () => {
     }
   })
 
-  it('maps the extension date formats to their semantic native type', () => {
-    expect(preferredDatatype('date_mdy')).toBe('date')
-    expect(preferredDatatype('date_dmy')).toBe('date')
-    expect(preferredDatatype('timestamp')).toBe('dateTime')
+  it('leaves the REDCap formats to HARMONIZATION_TARGET — no free rename', () => {
+    // date_mdy truthfully describes mm/dd/yyyy source data: renaming the
+    // dictionary alone would make it lie, so these are harmonization
+    // recommendations, not preferences.
+    expect(preferredDatatype('date_mdy')).toBeNull()
+    expect(HARMONIZATION_TARGET['date_mdy']).toBe('date')
+    expect(HARMONIZATION_TARGET['date_dmy']).toBe('date')
+    expect(HARMONIZATION_TARGET['timestamp']).toBe('dateTime')
   })
 
   it('falls back to string for unknown custom names', () => {
     expect(preferredDatatype('zipcode')).toBe('string')
   })
 
-  it('every non-native PREFERRED_DATATYPE target is itself native', () => {
+  it('every suggested target is itself native', () => {
     // The fix button applies preferredDatatype's result; it must never
-    // suggest a datatype that would itself get flagged.
-    for (const dt of ['int', 'token', 'date_mdy', 'timestamp']) {
+    // suggest a datatype that would itself get flagged. Harmonization
+    // targets get no button but must satisfy the same invariant.
+    for (const dt of ['int', 'token']) {
       expect(LINKML_NATIVE.has(preferredDatatype(dt)!)).toBe(true)
+    }
+    for (const target of Object.values(HARMONIZATION_TARGET)) {
+      expect(LINKML_NATIVE.has(target)).toBe(true)
     }
   })
 })

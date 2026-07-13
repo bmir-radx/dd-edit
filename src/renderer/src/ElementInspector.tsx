@@ -16,7 +16,14 @@ marked.setOptions({ breaks: true })
 import { setField } from './model/document'
 import { useEditor } from './model/store'
 import { CommitInput, CommitTextarea, CommitWrapInput, StringListEditor } from './inputs'
-import { ALIAS_DATATYPES, LINKML_NATIVE, needsIntegerDatatype, preferredDatatype, wantsUnit } from './datatypes'
+import {
+  ALIAS_DATATYPES,
+  HARMONIZATION_TARGET,
+  LINKML_NATIVE,
+  needsIntegerDatatype,
+  preferredDatatype,
+  wantsUnit,
+} from './datatypes'
 import { idNeedsCleanup, sanitizeId } from './ids'
 import { pillColors } from './pillColors'
 import { PreconditionField } from './PreconditionField'
@@ -231,7 +238,15 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             </div>
           </label>
         </div>
-        {preferredDatatype(element.datatype) !== null ? (
+        {HARMONIZATION_TARGET[element.datatype] !== undefined ? (
+          // A quiet statement, deliberately without a one-click: date_mdy
+          // truthfully describes mm/dd/yyyy source data, and changing the
+          // dictionary alone would make it lie. Harmonize the data first.
+          <div className="soft-hint">
+            REDCap format — valid as-is. When the datafile is harmonized to ISO
+            dates, change this to <code>{HARMONIZATION_TARGET[element.datatype]}</code>.
+          </div>
+        ) : preferredDatatype(element.datatype) !== null ? (
           <div className="fix-hint">
             <span className="msg">
               {ALIAS_DATATYPES.has(element.datatype) ? (

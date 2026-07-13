@@ -49,14 +49,28 @@ const XSD_STRINGS = [...XSD_STRING_ALIASES, ...XSD_CUSTOM_STRINGS]
 export const PREFERRED_DATATYPE: Record<string, string> = {
   ...Object.fromEntries(XSD_INTEGERS.map((n) => [n, 'integer'])),
   ...Object.fromEntries(XSD_STRINGS.map((n) => [n, 'string'])),
+}
+
+/**
+ * REDCap-style source formats and their harmonized targets. UNLIKE the pure
+ * renames above, these truthfully describe the datafile as it is (mm/dd/yyyy
+ * strings, Unix seconds) — changing the dictionary alone would make it lie,
+ * so the UI states the recommendation without offering a one-click.
+ */
+export const HARMONIZATION_TARGET: Record<string, string> = {
   date_mdy: 'date',
   date_dmy: 'date',
   timestamp: 'dateTime',
 }
 
-/** The preferred native equivalent, or null when the datatype already is one. */
+/**
+ * The preferred native equivalent for a free rename, or null — when the
+ * datatype already is native, or when it's a harmonization format (renaming
+ * those is a data migration, HARMONIZATION_TARGET's business).
+ */
 export function preferredDatatype(datatype: string): string | null {
   if (datatype === '' || LINKML_NATIVE.has(datatype)) return null
+  if (HARMONIZATION_TARGET[datatype] !== undefined) return null
   return PREFERRED_DATATYPE[datatype] ?? 'string'
 }
 

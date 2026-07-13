@@ -27,7 +27,10 @@ import { parseToDocument, serializeForPath, sidecar, type Finding } from './side
 import { PreviewPane } from './PreviewPane'
 import { ProblemsPanel } from './ProblemsPanel'
 
-type PanelTab = 'element' | 'csv' | 'linkml' | 'html' | 'problems'
+// Problems is not a tab: it concerns the whole document while the inspector
+// concerns one element, and the fix workflow (click problem → land on cell →
+// edit in inspector) needs both visible — so problems live in a bottom dock.
+type PanelTab = 'element' | 'csv' | 'linkml' | 'html'
 
 function baseName(path: string | null): string {
   if (!path) return 'Untitled'
@@ -78,6 +81,39 @@ export function App() {
     const stored = Number(localStorage.getItem('dd-edit.panelWidth'))
     return stored >= 280 && stored <= 800 ? stored : 400
   })
+
+  // The problems dock (bottom), independent of the right panel; open state
+  // and height persist.
+  const [problemsOpen, setProblemsOpen] = useState(
+    () => localStorage.getItem('dd-edit.problemsOpen') === '1',
+  )
+  useEffect(() => {
+    localStorage.setItem('dd-edit.problemsOpen', problemsOpen ? '1' : '0')
+  }, [problemsOpen])
+  const [problemsHeight, setProblemsHeight] = useState(() => {
+    const stored = Number(localStorage.getItem('dd-edit.problemsHeight'))
+    return stored >= 120 && stored <= 600 ? stored : 220
+  })
+  useEffect(() => {
+    localStorage.setItem('dd-edit.problemsHeight', String(problemsHeight))
+  }, [problemsHeight])
+
+  const startDockResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault()
+      const startY = e.clientY
+      const startH = problemsHeight
+      const move = (ev: PointerEvent) =>
+        setProblemsHeight(Math.min(600, Math.max(120, startH + (startY - ev.clientY))))
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [problemsHeight],
+  )
 
   useEffect(() => {
     localStorage.setItem('dd-edit.panelWidth', String(panelWidth))
@@ -372,10 +408,15 @@ export function App() {
           </select>
         ) : null}
         <span className="spacer" />
-        {errorCount + warningCount > 0 ? (
-          <button className="problem-summary" onClick={() => setPanelTab('problems')}>
+        {findings.length > 0 ? (
+          <button
+            className={`problem-summary${problemsOpen ? ' toggled' : ''}`}
+            onClick={() => setProblemsOpen((o) => !o)}
+            title="Show / hide the problems dock"
+          >
             {errorCount > 0 ? <span className="err"><IconError />{errorCount}</span> : null}
             {warningCount > 0 ? <span className="warn"><IconWarning />{warningCount}</span> : null}
+            {errorCount + warningCount === 0 ? <span className="info">{findings.length}</span> : null}
           </button>
         ) : null}
         <button onClick={() => setPanelTab(panelOpen ? null : 'element')}>
@@ -406,50 +447,67 @@ export function App() {
           </div>
         ) : (
           <>
-            <div className="grid-host">
-              <GridView
-                onCursorRow={setCursorRow}
-                onSelectedRows={setSelectedRows}
-                showSearch={showSearch}
-                onSearchClose={() => setShowSearch(false)}
-                findings={findings}
-                wrappedCols={wrappedCols}
-                onHeaderMenu={(key, pos) => setHeaderMenu({ key, ...pos })}
-                jumpTarget={jumpTarget}
-              />
+            <div className="work-row">
+              <div className="grid-host">
+                <GridView
+                  onCursorRow={setCursorRow}
+                  onSelectedRows={setSelectedRows}
+                  showSearch={showSearch}
+                  onSearchClose={() => setShowSearch(false)}
+                  findings={findings}
+                  wrappedCols={wrappedCols}
+                  onHeaderMenu={(key, pos) => setHeaderMenu({ key, ...pos })}
+                  jumpTarget={jumpTarget}
+                />
+              </div>
+              {panelOpen ? (
+                <aside className="panel" style={{ width: panelWidth }}>
+                  <div
+                    className="panel-resizer"
+                    onPointerDown={startPanelResize}
+                    title="Drag to resize"
+                  />
+                  <div className="tabs">
+                    {tab('element', 'Element')}
+                    {tab('csv', 'CSV')}
+                    {tab('linkml', 'LinkML')}
+                    {tab('html', 'HTML')}
+                  </div>
+                  <div className="body">
+                    {panelTab === 'element' ? (
+                      <ElementInspector row={cursorRow} datatypes={datatypes} />
+                    ) : (
+                      <PreviewPane
+                        format={panelTab}
+                        enabled={true}
+                        title={displayName}
+                        selectedRows={selectedRows}
+                      />
+                    )}
+                  </div>
+                </aside>
+              ) : null}
             </div>
-            {panelOpen ? (
-              <aside className="panel" style={{ width: panelWidth }}>
+            {problemsOpen ? (
+              <section className="problems-dock" style={{ height: problemsHeight }}>
                 <div
-                  className="panel-resizer"
-                  onPointerDown={startPanelResize}
+                  className="dock-resizer"
+                  onPointerDown={startDockResize}
                   title="Drag to resize"
                 />
-                <div className="tabs">
-                  {tab('element', 'Element')}
-                  {tab('csv', 'CSV')}
-                  {tab('linkml', 'LinkML')}
-                  {tab('html', 'HTML')}
-                  {tab(
-                    'problems',
-                    findings.length > 0 ? `Problems (${findings.length})` : 'Problems',
-                  )}
+                <header className="dock-head">
+                  <span className="dock-title">
+                    Problems{findings.length > 0 ? ` (${findings.length})` : ''}
+                  </span>
+                  <span className="spacer" />
+                  <button className="dock-close" onClick={() => setProblemsOpen(false)} title="Close">
+                    ✕
+                  </button>
+                </header>
+                <div className="dock-body">
+                  <ProblemsPanel findings={findings} onJump={jumpToRow} />
                 </div>
-                <div className="body">
-                  {panelTab === 'element' ? (
-                    <ElementInspector row={cursorRow} datatypes={datatypes} />
-                  ) : panelTab === 'problems' ? (
-                    <ProblemsPanel findings={findings} onJump={jumpToRow} />
-                  ) : (
-                    <PreviewPane
-                      format={panelTab}
-                      enabled={true}
-                      title={displayName}
-                      selectedRows={selectedRows}
-                    />
-                  )}
-                </div>
-              </aside>
+              </section>
             ) : null}
           </>
         )}
