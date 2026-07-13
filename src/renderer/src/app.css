@@ -731,11 +731,35 @@ button.toggled {
 }
 .fix-hint button:hover { background: #fdf3d0; }
 
-/* Quiet nudges: informational, no action required, never amber. */
-.soft-hint { margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--text-dim); }
+/* Quiet nudges: informational, never amber; a soft action may tag along. */
+.soft-hint { margin-top: 4px; font-size: 11px; line-height: 1.6; color: var(--text-dim); }
 .soft-hint code {
   font-family: Menlo, ui-monospace, monospace;
   font-size: 10.5px;
+  background: #eef1f4;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.soft-hint .soft-action {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text-dim);
+  cursor: pointer;
+  vertical-align: baseline;
+}
+.soft-hint .soft-action:hover { color: var(--accent); border-color: var(--accent); background: #fff; }
+
+/* The element id in a problem's location line: the thing you scan for. */
+.problem .where .pid {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #1f2328;
   background: #eef1f4;
   padding: 0 4px;
   border-radius: 4px;
@@ -814,9 +838,19 @@ button.toggled {
 .problem .msg { white-space: normal; }
 .problem .where { font-size: 11px; color: var(--text-dim); }
 
-.problem-summary { display: flex; gap: 8px; align-items: center; }
+/* The toolbar problems badge: tinted by the worst level so it reads at a
+   glance (it was a plain button and too easy to miss). */
+.problem-summary { display: flex; gap: 8px; align-items: center; font-weight: 600; }
 .problem-summary .err { color: var(--danger); }
-.problem-summary .warn { color: #b7791f; }
+.problem-summary .warn { color: #9a6700; }
+.problem-summary.error { background: #fdecea; border-color: #f0b4ac; }
+.problem-summary.error:hover { background: #fbdcd8; border-color: var(--danger); }
+.problem-summary.warning { background: #fdf3d0; border-color: #e4cd85; }
+.problem-summary.warning:hover { background: #fbead0; border-color: #b7791f; }
+.problem-summary.quiet { background: #eef1f4; border-color: #d3d9e0; }
+.problem-summary.toggled { box-shadow: inset 0 0 0 1.5px currentColor; }
+.problem-summary.error.toggled { color: var(--danger); }
+.problem-summary.warning.toggled { color: #9a6700; }
 
 .statusbar .stat-err { color: var(--danger); }
 .statusbar .stat-warn { color: #b7791f; }

@@ -57,10 +57,10 @@ export const PREFERRED_DATATYPE: Record<string, string> = {
  * strings, Unix seconds) — changing the dictionary alone would make it lie,
  * so the UI states the recommendation without offering a one-click.
  */
-export const HARMONIZATION_TARGET: Record<string, string> = {
-  date_mdy: 'date',
-  date_dmy: 'date',
-  timestamp: 'dateTime',
+export const HARMONIZATION_TARGET: Record<string, { target: string; example: string }> = {
+  date_mdy: { target: 'date', example: '05/27/2014 becomes 2014-05-27' },
+  date_dmy: { target: 'date', example: '27/05/2014 becomes 2014-05-27' },
+  timestamp: { target: 'dateTime', example: '1401148800 becomes 2014-05-27T00:00:00Z' },
 }
 
 /**

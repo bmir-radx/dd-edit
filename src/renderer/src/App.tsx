@@ -410,7 +410,9 @@ export function App() {
         <span className="spacer" />
         {findings.length > 0 ? (
           <button
-            className={`problem-summary${problemsOpen ? ' toggled' : ''}`}
+            className={`problem-summary ${
+              errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : 'quiet'
+            }${problemsOpen ? ' toggled' : ''}`}
             onClick={() => setProblemsOpen((o) => !o)}
             title="Show / hide the problems dock"
           >

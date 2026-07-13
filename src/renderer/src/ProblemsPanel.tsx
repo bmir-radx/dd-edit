@@ -84,7 +84,19 @@ export function ProblemsPanel({
         <span className="text">
           <span className="msg">{f.message}</span>
           <span className="where">
-            {row !== null ? `row ${row + 1}${id ? ` · ${id}` : ''}` : 'whole file'}
+            {row !== null ? (
+              <>
+                row {row + 1}
+                {id ? (
+                  <>
+                    {' · '}
+                    <code className="pid">{id}</code>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              'whole file'
+            )}
             {f.column ? ` · ${f.column}` : ''}
           </span>
         </span>

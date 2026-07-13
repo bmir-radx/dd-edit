@@ -243,8 +243,9 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           // truthfully describes mm/dd/yyyy source data, and changing the
           // dictionary alone would make it lie. Harmonize the data first.
           <div className="soft-hint">
-            REDCap format — valid as-is. When the datafile is harmonized to ISO
-            dates, change this to <code>{HARMONIZATION_TARGET[element.datatype]}</code>.
+            REDCap format — valid as-is. When the datafile is harmonized, change this to{' '}
+            <code>{HARMONIZATION_TARGET[element.datatype].target}</code> (so{' '}
+            {HARMONIZATION_TARGET[element.datatype].example}).
           </div>
         ) : preferredDatatype(element.datatype) !== null ? (
           <div className="fix-hint">
@@ -294,10 +295,18 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           <UnitAssist value={text('unit')} onUse={commitNullable('unit')} />
           {wantsUnit(element) ? (
             // Deliberately quiet (not amber): counts and scores are
-            // legitimately unitless, so this is a nudge, not a problem.
+            // legitimately unitless, so this is a nudge, not a problem. The
+            // one-click covers the common resolution: declaring it a count.
             <div className="soft-hint">
-              Numeric field with no unit — consider a UCUM unit, or <code>1</code>{' '}
-              (dimensionless) for counts and scores.
+              Numeric field with no unit — consider a UCUM unit, or dimensionless
+              (<code>1</code>) for counts and scores.
+              <button
+                type="button"
+                className="soft-action"
+                onClick={() => commitNullable('unit')('1')}
+              >
+                Set to 1 (dimensionless)
+              </button>
             </div>
           ) : null}
         </label>

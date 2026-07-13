@@ -29,9 +29,11 @@ describe('preferredDatatype', () => {
     // dictionary alone would make it lie, so these are harmonization
     // recommendations, not preferences.
     expect(preferredDatatype('date_mdy')).toBeNull()
-    expect(HARMONIZATION_TARGET['date_mdy']).toBe('date')
-    expect(HARMONIZATION_TARGET['date_dmy']).toBe('date')
-    expect(HARMONIZATION_TARGET['timestamp']).toBe('dateTime')
+    expect(HARMONIZATION_TARGET['date_mdy'].target).toBe('date')
+    expect(HARMONIZATION_TARGET['date_dmy'].target).toBe('date')
+    expect(HARMONIZATION_TARGET['timestamp'].target).toBe('dateTime')
+    // Each carries a concrete transformation so "harmonize" is unambiguous.
+    expect(HARMONIZATION_TARGET['date_mdy'].example).toContain('2014-05-27')
   })
 
   it('falls back to string for unknown custom names', () => {
@@ -45,7 +47,7 @@ describe('preferredDatatype', () => {
     for (const dt of ['int', 'token']) {
       expect(LINKML_NATIVE.has(preferredDatatype(dt)!)).toBe(true)
     }
-    for (const target of Object.values(HARMONIZATION_TARGET)) {
+    for (const { target } of Object.values(HARMONIZATION_TARGET)) {
       expect(LINKML_NATIVE.has(target)).toBe(true)
     }
   })
