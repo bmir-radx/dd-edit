@@ -140,12 +140,48 @@ export function App() {
 
   // ------------------------------------------------------------ commands
 
-  const confirmDiscard = useCallback((): boolean => {
-    return !useEditor.getState().dirty || window.confirm('Discard unsaved changes?')
-  }, [])
+  const saveTo = useCallback(
+    async (path: string) => {
+      try {
+        const content = await serializeForPath(useEditor.getState().doc, path)
+        await window.ddEdit.saveFile(path, content)
+        markSaved(path)
+      } catch (err) {
+        window.alert(`Save failed:\n${err instanceof Error ? err.message : err}`)
+      }
+    },
+    [markSaved],
+  )
 
-  const doNew = useCallback(() => {
-    if (!confirmDiscard()) return
+  const doSaveAs = useCallback(async () => {
+    const current = useEditor.getState().filePath
+    const path = await window.ddEdit.chooseSavePath(current ?? 'dictionary.dd.csv')
+    if (path) await saveTo(path)
+  }, [saveTo])
+
+  const doSave = useCallback(async () => {
+    const current = useEditor.getState().filePath
+    if (current) await saveTo(current)
+    else await doSaveAs()
+  }, [saveTo, doSaveAs])
+
+  // The standard replace-a-dirty-document question, as a native
+  // Save / Don't Save / Cancel sheet. Resolves true when it is safe to
+  // replace the document (saved, or explicitly not saved).
+  const confirmDiscard = useCallback(async (): Promise<boolean> => {
+    if (!useEditor.getState().dirty) return true
+    const choice = await window.ddEdit.confirmDiscard(baseName(useEditor.getState().filePath))
+    if (choice === 'cancel') return false
+    if (choice === 'save') {
+      await doSave()
+      // A cancelled save-as leaves the document dirty: don't replace it.
+      return !useEditor.getState().dirty
+    }
+    return true
+  }, [doSave])
+
+  const doNew = useCallback(async () => {
+    if (!(await confirmDiscard())) return
     loadDocument(newDocument(), null, false)
     setCursorRow(null)
   }, [confirmDiscard, loadDocument])
@@ -179,7 +215,7 @@ export function App() {
   )
 
   const doOpen = useCallback(async () => {
-    if (!confirmDiscard()) return
+    if (!(await confirmDiscard())) return
     const file = await window.ddEdit.openFile()
     if (!file) return
     await openParsedOrImport(file)
@@ -188,7 +224,7 @@ export function App() {
   // Open a known path (welcome-screen reopen button, Open Recent menu).
   const doOpenPath = useCallback(
     async (path: string) => {
-      if (!confirmDiscard()) return
+      if (!(await confirmDiscard())) return
       try {
         const file = await window.ddEdit.openPath(path)
         await openParsedOrImport(file)
@@ -204,7 +240,7 @@ export function App() {
   }, [lastFile, doOpenPath])
 
   const doImportRedcap = useCallback(async () => {
-    if (!confirmDiscard()) return
+    if (!(await confirmDiscard())) return
     const file = await window.ddEdit.openRedcapFile()
     if (!file) return
     try {
@@ -216,31 +252,6 @@ export function App() {
       window.alert(`REDCap import failed:\n${err instanceof Error ? err.message : err}`)
     }
   }, [confirmDiscard, loadDocument])
-
-  const saveTo = useCallback(
-    async (path: string) => {
-      try {
-        const content = await serializeForPath(useEditor.getState().doc, path)
-        await window.ddEdit.saveFile(path, content)
-        markSaved(path)
-      } catch (err) {
-        window.alert(`Save failed:\n${err instanceof Error ? err.message : err}`)
-      }
-    },
-    [markSaved],
-  )
-
-  const doSaveAs = useCallback(async () => {
-    const current = useEditor.getState().filePath
-    const path = await window.ddEdit.chooseSavePath(current ?? 'dictionary.dd.csv')
-    if (path) await saveTo(path)
-  }, [saveTo])
-
-  const doSave = useCallback(async () => {
-    const current = useEditor.getState().filePath
-    if (current) await saveTo(current)
-    else await doSaveAs()
-  }, [saveTo, doSaveAs])
 
   const addElement = useCallback(() => {
     const at = cursorRow === null ? useEditor.getState().doc.elements.length : cursorRow + 1

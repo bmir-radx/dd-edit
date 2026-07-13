@@ -200,6 +200,21 @@ ipcMain.handle('file:save', async (_event, filePath: string, content: string) =>
   await writeFile(filePath, content, 'utf8')
   void rememberFile(filePath) // a save-as target becomes the reopen candidate
 })
+// The standard "save your changes?" three-button sheet, for replacing the
+// current document (New / Open / Import with unsaved edits). The renderer
+// runs the actual save; this just asks the question natively.
+ipcMain.handle('dialog:confirm-discard', (event, name: string) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const choice = dialog.showMessageBoxSync(win ?? BrowserWindow.getFocusedWindow()!, {
+    type: 'warning',
+    message: `Do you want to save the changes you made to ${name}?`,
+    detail: "Your changes will be lost if you don't save them.",
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+  })
+  return (['save', 'discard', 'cancel'] as const)[choice]
+})
 ipcMain.handle('shell:open-external', async (_event, url: string) => {
   // Only web URLs — never file:// or app-defined schemes from renderer input.
   if (/^https?:\/\//i.test(url)) await shell.openExternal(url)
@@ -265,6 +280,27 @@ function buildMenu(): void {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Toggle Side Panel',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => sendMenu('toggle-panel'),
+        },
+        {
+          label: 'Toggle Problems',
+          accelerator: 'Shift+CmdOrCtrl+M',
+          click: () => sendMenu('toggle-problems'),
+        },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
       ],
     },
     { role: 'windowMenu' },

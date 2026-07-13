@@ -21,6 +21,8 @@ declare global {
       saveFile: (path: string, content: string) => Promise<void>
       /** Open an http(s) URL in the system browser. */
       openExternal: (url: string) => Promise<void>
+      /** Native Save / Don't Save / Cancel sheet for replacing a dirty document. */
+      confirmDiscard: (name: string) => Promise<'save' | 'discard' | 'cancel'>
       /** Subscribe to application-menu actions; returns unsubscribe. */
       onMenu: (cb: (action: string, payload?: string) => void) => () => void
     }
