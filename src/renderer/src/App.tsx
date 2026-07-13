@@ -273,6 +273,9 @@ export function App() {
     'import-redcap': () => void doImportRedcap(),
     undo,
     redo,
+    // View menu toggles; hiding the side panel clears the active tab.
+    'toggle-panel': () => setPanelTab(panelTab === null ? 'element' : null),
+    'toggle-problems': () => setProblemsOpen((o) => !o),
   }
 
   useEffect(() => {

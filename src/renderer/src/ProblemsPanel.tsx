@@ -13,6 +13,10 @@ import { findingRow, type Finding, type FindingLevel } from './sidecar'
 
 const LEVEL_ORDER = { ERROR: 0, WARNING: 1, INFO: 2 } as const
 
+// Checks that sort after everything else of the same severity: advisory
+// naming preferences shouldn't sit above genuine content findings.
+const DEMOTED_CHECKS = new Set(['datatype-preferred'])
+
 /** A check with at least this many findings renders as one group. */
 const GROUP_THRESHOLD = 4
 
@@ -37,6 +41,9 @@ export function ProblemsPanel({
     const sorted = findings.slice().sort((a, b) => {
       const byLevel = LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]
       if (byLevel !== 0) return byLevel
+      const byDemotion =
+        Number(DEMOTED_CHECKS.has(a.check)) - Number(DEMOTED_CHECKS.has(b.check))
+      if (byDemotion !== 0) return byDemotion
       return (a.line ?? 0) - (b.line ?? 0)
     })
     const byCheck = new Map<string, Finding[]>()

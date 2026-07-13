@@ -29,6 +29,7 @@ import { pillColors } from './pillColors'
 import { PreconditionField } from './PreconditionField'
 import { sidecar } from './sidecar'
 import { UCUM_UNITS, ucumSuggestion, ucumUnit } from './ucum'
+import { isAbsoluteHttpUrl } from './urls'
 import type { DataElement, EnumItem } from './types/document'
 
 /** Pill colors for the value badge over a datatype/cardinality select. */
@@ -239,13 +240,14 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           </label>
         </div>
         {HARMONIZATION_TARGET[element.datatype] !== undefined ? (
-          // A quiet statement, deliberately without a one-click: date_mdy
-          // truthfully describes mm/dd/yyyy source data, and changing the
-          // dictionary alone would make it lie. Harmonize the data first.
+          // A heads-up, not a problem — and deliberately without a one-click:
+          // date_mdy truthfully describes mm/dd/yyyy source data, and changing
+          // the dictionary alone would make it lie. The data changes first.
           <div className="soft-hint">
-            REDCap format — valid as-is. When the datafile is harmonized, change this to{' '}
-            <code>{HARMONIZATION_TARGET[element.datatype].target}</code> (so{' '}
-            {HARMONIZATION_TARGET[element.datatype].example}).
+            <code>{element.datatype}</code> is a standard REDCap format — nothing to fix. If
+            the data itself is ever converted/harmonized (
+            {HARMONIZATION_TARGET[element.datatype].example}), change the datatype to{' '}
+            <code>{HARMONIZATION_TARGET[element.datatype].target}</code> to match.
           </div>
         ) : preferredDatatype(element.datatype) !== null ? (
           <div className="fix-hint">
@@ -362,7 +364,7 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
         />
         <label className="field">
           <span>Notes <Dot k="notes" /></span>
-          <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={2} />
+          <CommitTextarea value={text('notes')} onCommit={commitNullable('notes')} rows={6} />
         </label>
         <div className="field">
           <span className="tag-label">Example values <Dot k="examples" /></span>
@@ -373,16 +375,30 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
             addLabel="+ add example"
           />
         </div>
-        <div className="row2">
-          <label className="field">
-            <span>Provenance <Dot k="provenance" /></span>
-            <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
-          </label>
-          <label className="field">
-            <span>See also (URL) <Dot k="see_also" /></span>
-            <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
-          </label>
-        </div>
+        <label className="field">
+          <span>Provenance <Dot k="provenance" /></span>
+          <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
+        </label>
+        <label className="field">
+          <span>
+            See also (URL) <Dot k="see_also" />
+            {isAbsoluteHttpUrl(text('see_also').trim()) ? (
+              <button
+                type="button"
+                className="linkout"
+                title={`Open ${text('see_also').trim()} in your browser`}
+                onClick={(e) => {
+                  e.preventDefault() // don't let the surrounding <label> grab focus
+                  void window.ddEdit.openExternal(text('see_also').trim())
+                }}
+              >
+                ↗
+              </button>
+            ) : null}
+          </span>
+          <CommitInput value={text('see_also')} onCommit={commitNullable('see_also')} />
+          <SeeAlsoAssist value={text('see_also')} onUse={commitNullable('see_also')} />
+        </label>
       </section>
     </div>
   )
@@ -581,8 +597,9 @@ function UnitInput({ value, onCommit }: { value: string; onCommit: (value: strin
                 accept(u.code)
               }}
             >
-              <span className="main value">{u.code}</span>
-              <span className="detail">{u.name}</span>
+              {/* Name first (what a person recognizes); the inserted code after. */}
+              <span className="main name">{u.name}</span>
+              <span className="detail code">{u.code}</span>
             </div>
           ))}
         </div>
@@ -615,6 +632,34 @@ function UnitAssist({ value, onUse }: { value: string; onUse: (unit: string) => 
         </div>
       ) : null}
     </>
+  )
+}
+
+/**
+ * Under the See also field: warns when the value is not an absolute web URL,
+ * and offers the https:// prefix as a one-click when that alone fixes it.
+ * Advisory only — the value is saved as typed.
+ */
+function SeeAlsoAssist({ value, onUse }: { value: string; onUse: (v: string) => void }) {
+  const v = value.trim()
+  if (v === '' || isAbsoluteHttpUrl(v)) return null
+  const prefixed = `https://${v}`
+  if (isAbsoluteHttpUrl(prefixed) && !v.includes(' ')) {
+    return (
+      <div className="fix-hint">
+        <span className="msg">
+          Not an absolute URL — a scheme is missing.
+        </span>
+        <button type="button" onClick={() => onUse(prefixed)}>
+          Use {prefixed.length > 40 ? 'https://…' : prefixed}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="unit-hint warn">
+      Not a valid absolute URL — expected a full web address like https://example.org/page.
+    </div>
   )
 }
 

@@ -36,6 +36,12 @@ import { findingRow, type Finding, type FindingLevel } from './sidecar'
 import { needsIntegerDatatype, wantsUnit } from './datatypes'
 import { idNeedsCleanup } from './ids'
 import { ucumSuggestion, ucumUnit } from './ucum'
+import { isUnitCell, unitCellRenderer } from './unitCell'
+import { isAbsoluteHttpUrl } from './urls'
+
+// Stable array identity: a fresh array per render would re-register the
+// renderers with the grid on every render.
+const UNIT_RENDERERS = [unitCellRenderer]
 import type { DataElement, EnumItem } from './types/document'
 
 /** The validator reports CSV column headers; map them to element fields. */
@@ -357,7 +363,8 @@ const COLUMNS: ColumnSpec[] = [
   { key: 'datatype', title: 'Datatype', width: 145, kind: 'text' },
   { key: 'cardinality', title: 'Cardinality', width: 100, kind: 'text' },
   { key: 'required', title: 'Required', width: 85, kind: 'boolean' },
-  { key: 'unit', title: 'Unit', width: 90, kind: 'text', nullable: true },
+  // Wide enough for a typical "name (code)" rendering without truncation.
+  { key: 'unit', title: 'Unit', width: 130, kind: 'text', nullable: true },
   { key: 'enumeration', title: 'Enumeration', width: 230, kind: 'bubble' },
   { key: 'pattern', title: 'Pattern', width: 130, kind: 'text', nullable: true },
   { key: 'precondition', title: 'Precondition', width: 160, kind: 'text', nullable: true },
@@ -727,6 +734,21 @@ export function GridView({
 
       const raw = element[key as ScalarKey]
       const text = raw == null ? '' : String(raw)
+      if (spec.key === 'unit') {
+        // Custom cell purely for its editor (the UCUM typeahead); value
+        // semantics stay text — copyData is what copy/search use. Drawing is
+        // drawCell's (name-first, fix pill, ⓘ), keyed on isUnitCell.
+        return {
+          kind: GridCellKind.Custom,
+          data: { kind: 'unit-cell', value: text },
+          copyData: text,
+          allowOverlay: true,
+          ...(tint ? { themeOverride: { bgCell: tint } } : {}),
+          ...(pillHover !== null && pillHover.col === col && pillHover.row === row
+            ? { cursor: 'pointer' as const }
+            : {}),
+        }
+      }
       // Cardinality and datatype are custom-drawn as colored pills (drawCell
       // below) while remaining ordinary editable text cells; section shows
       // its stable pastel as the cell background (validation tint wins).
@@ -736,6 +758,26 @@ export function GridView({
         const sectionBg = sectionColors.get(text)
         if (sectionBg) over.bgCell = sectionBg
       }
+      if (spec.key === 'see_also') {
+        // See-also renders as a link cell: hover underlines and clicking the
+        // text opens the URL in the system browser — but only a valid
+        // absolute http(s) URL gets the affordance; anything else stays
+        // inert (and editable) text.
+        const url = text.trim()
+        const linkable = isAbsoluteHttpUrl(url)
+        return {
+          kind: GridCellKind.Uri,
+          data: text,
+          displayData: text,
+          allowOverlay: true,
+          hoverEffect: linkable,
+          ...(linkable
+            ? { onClickUri: () => void window.ddEdit.openExternal(url) }
+            : {}),
+          ...(Object.keys(over).length > 0 ? { themeOverride: over } : {}),
+        }
+      }
+
       return {
         kind: GridCellKind.Text,
         data: text,
@@ -763,6 +805,16 @@ export function GridView({
       if (newValue.kind === GridCellKind.Markdown && spec.key === 'description') {
         const text = newValue.data
         apply((d) => setField(d, row, 'description', text === '' ? null : text))
+        return
+      }
+      if (newValue.kind === GridCellKind.Uri && spec.key === 'see_also') {
+        const text = newValue.data
+        apply((d) => setField(d, row, 'see_also', text === '' ? null : text))
+        return
+      }
+      if (newValue.kind === GridCellKind.Custom && spec.key === 'unit' && isUnitCell(newValue)) {
+        const text = newValue.data.value
+        apply((d) => setField(d, row, 'unit', text === '' ? null : text))
         return
       }
       if (newValue.kind !== GridCellKind.Text) return
@@ -889,16 +941,18 @@ export function GridView({
         return
       }
 
-      // Unit cells: a recognized UCUM code shows its name dimmed after the
-      // symbol ("mg (milligram)"); an informal spelling with a known UCUM
-      // equivalent shows an amber "→ code" fix pill (clickable — see
-      // onCellClicked, which shares the geometry below). Display only: the
-      // cell's value (edit, copy, search) stays the raw text.
-      if (key === 'unit' && cell.kind === GridCellKind.Text && cell.displayData !== '') {
-        const name = ucumUnit(cell.displayData)?.name
-        const suggestion = name === undefined ? ucumSuggestion(cell.displayData) : null
+      // Unit cells: a recognized UCUM code shows its name first with the code
+      // dimmed after it ("milligram (mg)") — the name is what a reader scans
+      // for; the code is the stored value, still visible and still what the
+      // editor opens with. An informal spelling with a known UCUM equivalent
+      // keeps its raw display plus an amber "→ code" fix pill (clickable —
+      // see onCellClicked, which shares the geometry via unitFixPillRange).
+      // Display only: the cell's value (edit, copy, search) stays raw.
+      if (key === 'unit' && cell.kind === GridCellKind.Custom && isUnitCell(cell) && cell.data.value !== '') {
+        const name = ucumUnit(cell.data.value)?.name
+        const suggestion = name === undefined ? ucumSuggestion(cell.data.value) : null
         if (name !== undefined || suggestion !== null) {
-          const symbol = cell.displayData
+          const symbol = cell.data.value
           const cy = firstLineCenterY(rect.y, rect.height)
           ctx.save()
           ctx.beginPath()
@@ -907,13 +961,15 @@ export function GridView({
           ctx.textBaseline = 'middle'
           ctx.font = BASE_FONT
           ctx.fillStyle = theme.textDark
-          ctx.fillText(symbol, rect.x + UNIT_PAD_X, cy)
-          const w = ctx.measureText(symbol).width
           if (name !== undefined) {
+            ctx.fillText(name, rect.x + UNIT_PAD_X, cy)
+            const w = ctx.measureText(name).width
             ctx.font = `12px ${theme.fontFamily}`
             ctx.fillStyle = theme.textLight
-            ctx.fillText(`(${name})`, rect.x + UNIT_PAD_X + w + 5, cy)
+            ctx.fillText(`(${symbol})`, rect.x + UNIT_PAD_X + w + 5, cy)
           } else if (suggestion !== null) {
+            ctx.fillText(symbol, rect.x + UNIT_PAD_X, cy)
+            const w = ctx.measureText(symbol).width
             ctx.font = PILL_FONT
             const label = `→ ${suggestion.code}`
             const pw = ctx.measureText(label).width + UNIT_FIX_PAD_X * 2
@@ -932,7 +988,7 @@ export function GridView({
 
       // Empty unit cells of numeric, non-enumerated fields carry a quiet gray
       // ⓘ (hover explains); the inspector's Unit field says the same thing.
-      if (key === 'unit' && cell.kind === GridCellKind.Text && cell.displayData === '') {
+      if (key === 'unit' && cell.kind === GridCellKind.Custom && isUnitCell(cell) && cell.data.value === '') {
         const element = doc.elements[args.row]
         if (element !== undefined && wantsUnit(element)) {
           const cx = rect.x + UNIT_PAD_X + 6
@@ -1294,6 +1350,7 @@ export function GridView({
       onColumnMoved={onColumnMoved}
       onCellClicked={onCellClicked}
       onItemHovered={onItemHovered}
+      customRenderers={UNIT_RENDERERS}
       onDelete={onDelete}
       onColumnResize={onColumnResize}
       gridSelection={selection}

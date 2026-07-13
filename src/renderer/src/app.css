@@ -468,6 +468,19 @@ pre.preview.yaml {
 }
 .term-item .linkout:disabled { color: #c9cfd6; }
 .term-item .linkout:not(:disabled):hover { color: #1d4ed8; background: transparent; }
+
+/* Inline linkout in a field's label line (See also): same quiet style. */
+.field > span .linkout {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.field > span .linkout:hover { color: #1d4ed8; background: transparent; }
 .term-item .remove {
   padding: 0;
   border: none;
@@ -602,6 +615,46 @@ button.toggled {
   max-height: 220px;
   overflow: auto;
 }
+/* The grid's in-cell unit editor: input above the suggestion list, inside
+   GDG's overlay (which provides the outer border). */
+.unit-editor { display: flex; flex-direction: column; min-width: 280px; }
+.unit-editor input {
+  border: none;
+  outline: none;
+  font: 13px system-ui, -apple-system, sans-serif;
+  padding: 8px 10px;
+}
+.unit-editor .unit-suggest {
+  border-top: 1px solid var(--border);
+  background: #fff;
+  max-height: 240px;
+  overflow: auto;
+}
+.unit-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: default;
+}
+.unit-item.hi { background: var(--accent-soft); }
+.unit-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unit-item .code {
+  margin-left: auto;
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Name-first unit rows inside the inspector's dropdown too. */
+.pc-item .main.name { font-family: inherit; color: var(--text); }
+.pc-item .detail.code {
+  font-family: Menlo, ui-monospace, monospace;
+  font-size: 11px;
+}
+
 /* Header row of a suggestion dropdown: says what the list is (and isn't). */
 .pc-suggest .suggest-note {
   position: sticky;
@@ -775,6 +828,7 @@ button.toggled {
   gap: 5px;
 }
 .unit-hint.ok { color: #1a7f37; }
+.unit-hint.warn { color: #9a6700; }
 .unit-hint code {
   font-family: Menlo, ui-monospace, monospace;
   background: #eef1f4;
@@ -830,10 +884,12 @@ button.toggled {
 }
 .problem:hover { background: var(--accent-soft); border-color: var(--border); }
 .problem:disabled { opacity: 1; cursor: default; }
-.problem .badge svg { margin-right: 0; }
-.problem.error .badge { color: var(--danger); }
-.problem.warning .badge { color: #b7791f; }
-.problem.info .badge { color: var(--text-dim); }
+/* Level icons: larger than the toolbar icons and unmistakably colored —
+   the icon is the row's severity signal, so it should not whisper. */
+.problem .badge svg { margin-right: 0; width: 19px; height: 19px; stroke-width: 2.25px; }
+.problem.error .badge { color: #d1242f; }
+.problem.warning .badge { color: #e08700; }
+.problem.info .badge { color: #0969da; }
 .problem .text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .problem .msg { white-space: normal; }
 .problem .where { font-size: 11px; color: var(--text-dim); }
