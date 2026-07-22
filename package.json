@@ -1,6 +1,6 @@
 {
   "name": "dd-edit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Desktop editor for data dictionaries — spreadsheet-style editing with live CSV, LinkML, and HTML previews",
   "license": "BSD-2-Clause",

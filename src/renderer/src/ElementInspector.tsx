@@ -376,12 +376,27 @@ export function ElementInspector({ row, datatypes }: { row: number | null; datat
           />
         </div>
         <label className="field">
-          <span>Provenance <Dot k="provenance" /></span>
+          <span>
+            Provenance <Dot k="provenance" />
+            <FieldHelp>
+              Where this element came from — the instrument, codebook, or collection that
+              defines it (for example an NIH CDE collection, a REDCap form, or an earlier
+              version of this dictionary). Free text; REDCap imports fill it in
+              automatically. It records lineage only — it does not affect validation or
+              the rendered schema.
+            </FieldHelp>
+          </span>
           <CommitInput value={text('provenance')} onCommit={commitNullable('provenance')} />
         </label>
         <label className="field">
           <span>
             See also (URL) <Dot k="see_also" />
+            <FieldHelp>
+              A web page with more about this element — a protocol page, a CDE registry
+              entry, or a publication. Must be a full absolute URL
+              (<code>https://…</code>) so it can be opened from here and from the grid;
+              the ↗ button opens it in your browser.
+            </FieldHelp>
             {isAbsoluteHttpUrl(text('see_also').trim()) ? (
               <button
                 type="button"

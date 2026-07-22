@@ -317,12 +317,22 @@ ipcMain.on('dirty-changed', (_event, dirty: boolean) => {
   isDirty = dirty
 })
 
+// Resolve the app icon PNG for the Windows/Linux window. Packaged builds keep
+// build/ next to the app resources; in dev it sits at the project root.
+function appIcon(): string {
+  const packaged = path.join(process.resourcesPath, 'build', 'icon.png')
+  return existsSync(packaged) ? packaged : path.join(__dirname, '../../build/icon.png')
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     // Native-feeling chrome on macOS: traffic lights over the app toolbar.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // Window/taskbar icon on Windows & Linux. macOS takes the icon from the
+    // packaged .app bundle (build/icon.icns via electron-builder), not here.
+    ...(process.platform !== 'darwin' ? { icon: appIcon() } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

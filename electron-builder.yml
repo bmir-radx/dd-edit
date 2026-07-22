@@ -5,6 +5,10 @@ appId: org.bmir.dd-edit
 productName: dd-edit
 directories:
   output: release
+  # Icons live here: build/icon.icns (mac), build/icon.ico (win),
+  # build/icon.png (linux + runtime window icon). electron-builder picks these
+  # up automatically by name; the per-platform icon: keys below are explicit.
+  buildResources: build
 files:
   - out/**
   - package.json
@@ -14,8 +18,13 @@ extraResources:
   # src/main/index.ts for the packaged case.
   - from: sidecar/dist/dd-edit-sidecar
     to: sidecar
+  # Ship the PNG icon so the Windows/Linux window/taskbar icon resolves at
+  # runtime (appIcon() in src/main/index.ts reads it from resources/build/).
+  - from: build/icon.png
+    to: build/icon.png
 mac:
   category: public.app-category.developer-tools
+  icon: build/icon.icns
   target:
     - target: dmg
     - target: zip
@@ -27,6 +36,7 @@ win:
   # ("More info" > "Run anyway"). The Windows sidecar binary must be built
   # ON Windows (PyInstaller does not cross-compile) — see the Release
   # Installers workflow, which builds every platform.
+  icon: build/icon.ico
   target:
     - target: nsis
 linux:
@@ -34,6 +44,7 @@ linux:
   # required. As with Windows, the Linux sidecar binary must be built on
   # Linux — the Release Installers workflow covers it.
   category: Development
+  icon: build/icon.png
   target:
     - target: AppImage
 npmRebuild: false

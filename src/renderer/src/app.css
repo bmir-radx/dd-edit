@@ -1007,3 +1007,48 @@ button.toggled {
   font-size: 11px;
   background: #fff;
 }
+
+/* ------------------------------------------------ unit cell typeahead */
+
+/* The grid's unit-cell overlay editor: an input with a UCUM suggestion
+   list under it, visually matching the precondition field's dropdown. */
+.unit-editor { position: relative; min-width: 220px; }
+.unit-editor input {
+  width: 100%;
+  border: none;
+  outline: none;
+  padding: 6px 8px;
+  font: 13px var(--font, inherit);
+  background: transparent;
+}
+.unit-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin-top: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(31, 35, 40, 0.12);
+}
+.unit-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: default;
+}
+.unit-item.hi { background: var(--accent-soft); }
+.unit-item .main { font-family: Menlo, ui-monospace, monospace; white-space: nowrap; }
+.unit-item .detail {
+  margin-left: auto;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
