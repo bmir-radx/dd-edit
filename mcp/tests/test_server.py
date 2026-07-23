@@ -8,6 +8,10 @@ import pytest
 
 from dd_edit_mcp import core, server
 
+
+def _ids(dd_json_text: str) -> list[str]:
+    return [e["id"] for e in json.loads(dd_json_text)["elements"]]
+
 # Fixtures lifted from the sidecar's tests, so both agree on behaviour.
 VALID_CSV = (
     "Id,Label,Datatype,Cardinality,Enumeration,Unit\n"
@@ -32,6 +36,77 @@ def test_core_valid_document_has_no_errors():
     # INFO/WARNING findings are allowed; only ERRORs make a document invalid.
     findings = core.validate_document(VALID_CSV)
     assert not [f for f in findings if f.level == "ERROR"]
+
+
+def test_add_element_appends_and_normalises():
+    result = core.add_element(
+        VALID_CSV,
+        {"id": "weight", "label": "Body weight", "datatype": "float",
+         "cardinality": "single", "unit": "kg"},
+    )
+    assert _ids(result.document) == ["age", "sex", "weight"]
+    # The toolkit normalises the inserted element (fills defaults).
+    added = json.loads(result.document)["elements"][-1]
+    assert added["datatype"] == "float" and added["enumeration"] == []
+    assert not [f for f in result.findings if f.level == "ERROR"]
+
+
+def test_add_element_respects_index_order():
+    # Element order is semantic, so index controls placement.
+    result = core.add_element(
+        VALID_CSV, {"id": "first", "label": "First", "datatype": "string"},
+        index=0,
+    )
+    assert _ids(result.document) == ["first", "age", "sex"]
+
+
+def test_add_element_does_not_mutate_input():
+    before = VALID_CSV
+    core.add_element(VALID_CSV, {"id": "x", "label": "X", "datatype": "string"})
+    assert VALID_CSV == before  # pure: caller's document untouched
+
+
+def test_add_element_duplicate_id_is_a_finding_not_an_error():
+    # Adding a clashing id must surface as a finding, not raise — the caller
+    # should see and fix it, matching the app's behaviour.
+    result = core.add_element(
+        VALID_CSV, {"id": "age", "label": "Age again", "datatype": "integer"},
+    )
+    assert _ids(result.document) == ["age", "sex", "age"]
+    assert any("duplicate" in f.check.lower() or "duplicate" in f.message.lower()
+               for f in result.findings)
+
+
+def test_add_element_rejects_missing_id_and_unknown_fields():
+    with pytest.raises(ValueError, match="id"):
+        core.add_element(VALID_CSV, {"label": "No id", "datatype": "string"})
+    with pytest.raises(ValueError, match="unknown"):
+        core.add_element(VALID_CSV, {"id": "y", "datatypes": "string"})
+
+
+def test_add_element_rejects_out_of_range_index():
+    with pytest.raises(ValueError, match="out of range"):
+        core.add_element(VALID_CSV, {"id": "z", "datatype": "string"}, index=99)
+
+
+@pytest.mark.asyncio
+async def test_add_element_over_mcp():
+    from mcp.shared.memory import (
+        create_connected_server_and_client_session as connect,
+    )
+
+    async with connect(server.mcp._mcp_server) as client:
+        tools = {t.name for t in (await client.list_tools()).tools}
+        assert {"validate_dictionary", "add_element"} <= tools
+
+        res = await client.call_tool("add_element", {
+            "content": VALID_CSV,
+            "element": {"id": "weight", "label": "Body weight",
+                        "datatype": "float", "unit": "kg"},
+        })
+        payload = json.loads(res.content[0].text)
+        assert _ids(payload["document"]) == ["age", "sex", "weight"]
+        assert payload["valid"] is True
 
 
 @pytest.mark.asyncio
