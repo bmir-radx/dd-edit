@@ -87,6 +87,82 @@ def add_element(content: str, element: dict, index: int | None = None) -> dict:
     }
 
 
+@mcp.tool()
+def list_elements(
+    content: str,
+    section: str | None = None,
+    datatype: str | None = None,
+    missing_field: str | None = None,
+) -> dict:
+    """List a dictionary's elements as compact summaries, optionally filtered.
+
+    Returns one summary {id, label, datatype, section} per element — enough to
+    survey a dictionary without pulling every field. Use get_element for the
+    full detail of a specific element.
+
+    Args:
+        content: The dictionary (dd-json, LinkML YAML, or CSV, auto-detected).
+        section: Only elements in this section. Pass "" for unsectioned ones.
+        datatype: Only elements of this datatype (e.g. "integer").
+        missing_field: Only elements whose named field is empty — for coverage
+            questions like which elements lack a "unit" or "description".
+
+    Returns:
+        {count, elements: [{id, label, datatype, section}, ...]}
+    """
+    elements = core.list_elements(
+        content, section=section, datatype=datatype, missing_field=missing_field
+    )
+    return {"count": len(elements), "elements": elements}
+
+
+@mcp.tool()
+def get_element(content: str, element_id: str) -> dict:
+    """Return the full detail of one element by id.
+
+    Args:
+        content: The dictionary (dd-json, LinkML YAML, or CSV, auto-detected).
+        element_id: The id of the element to fetch.
+
+    Returns:
+        {found: bool, element: <full dd-json element> | null}. If the id is
+        duplicated, the first occurrence is returned.
+    """
+    element = core.get_element(content, element_id)
+    return {"found": element is not None, "element": element}
+
+
+@mcp.tool()
+def describe_dictionary(content: str) -> dict:
+    """Summarise a dictionary: size, sections, datatypes in use, validity.
+
+    A quick orientation before querying or editing — how big the dictionary is,
+    how it is organised, and whether it currently validates.
+
+    Args:
+        content: The dictionary (dd-json, LinkML YAML, or CSV, auto-detected).
+
+    Returns:
+        {elementCount, sections, datatypes: {name: count}, valid, errorCount,
+        warningCount}
+    """
+    return core.describe_dictionary(content)
+
+
+@mcp.tool()
+def export(content: str, to: str = "csv") -> dict:
+    """Serialise a dictionary to another format.
+
+    Args:
+        content: The dictionary in any supported format (auto-detected).
+        to: Target format — "csv", "linkml" (YAML), or "json" (dd-json).
+
+    Returns:
+        {format, content} where content is the serialised dictionary text.
+    """
+    return {"format": to, "content": core.export(content, to)}
+
+
 def main() -> None:
     mcp.run()
 

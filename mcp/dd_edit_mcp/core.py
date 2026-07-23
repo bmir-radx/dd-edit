@@ -14,8 +14,18 @@ import json
 from dataclasses import dataclass
 
 import yaml
-from dd_api import DataDictionary
+from dd_api import DataDictionary, EmitOptions
 from dd_validator.validate import validate as validate_csv
+
+# LinkML emit options, feature-detected like the sidecar so LinkML export
+# matches the app: newer toolkits sort enum classes last.
+from dataclasses import fields as _dataclass_fields
+
+_LINKML_OPTIONS = (
+    EmitOptions(enums_last=True)
+    if any(f.name == "enums_last" for f in _dataclass_fields(EmitOptions))
+    else EmitOptions()
+)
 
 
 def detect(text: str) -> str:
@@ -204,3 +214,109 @@ def add_element(
     dd = DataDictionary.from_json(json.dumps(doc), **_ALLOW_DUPLICATE_IDS)
     new_text = dd.to_json()
     return EditResult(document=new_text, findings=_findings_from_csv(dd.to_csv()))
+
+
+# ------------------------------------------------------------------ queries
+#
+# Read-only tools. They work off the dd-json dict (load(...).to_json()) rather
+# than the DataElement object model, for the same reason add_element does: the
+# dd-json shape is canonical, stable, and exactly what a caller should see.
+
+
+def _elements(document: str) -> list[dict]:
+    return json.loads(load(document).to_json()).get("elements", [])
+
+
+def list_elements(
+    document: str,
+    *,
+    section: str | None = None,
+    datatype: str | None = None,
+    missing_field: str | None = None,
+) -> list[dict]:
+    """List elements as compact summaries, optionally filtered.
+
+    Each summary is {id, label, datatype, section} — enough to survey a
+    dictionary without pulling every field. Use get_element for full detail.
+
+    Filters (combined with AND):
+        section: only elements in this section (use "" for the unsectioned ones).
+        datatype: only elements of this datatype.
+        missing_field: only elements whose named field is null/empty — for
+            coverage checks like "which elements lack a unit".
+    """
+    out = []
+    for e in _elements(document):
+        if section is not None and (e.get("section") or "") != section:
+            continue
+        if datatype is not None and e.get("datatype") != datatype:
+            continue
+        if missing_field is not None:
+            v = e.get(missing_field)
+            if v not in (None, "", [], {}):
+                continue
+        out.append({
+            "id": e.get("id"),
+            "label": e.get("label"),
+            "datatype": e.get("datatype"),
+            "section": e.get("section"),
+        })
+    return out
+
+
+def get_element(document: str, element_id: str) -> dict | None:
+    """Return the full dd-json for one element by id, or None if not found.
+
+    If the id is duplicated in the document, the first occurrence is returned.
+    """
+    for e in _elements(document):
+        if e.get("id") == element_id:
+            return e
+    return None
+
+
+def describe_dictionary(document: str) -> dict:
+    """Summarise a dictionary: counts, sections, datatypes in use, validity.
+
+    A quick orientation for an LLM before it queries or edits — how big the
+    dictionary is, how it is organised, and whether it currently validates.
+    """
+    elements = _elements(document)
+    sections: list[str] = []
+    datatypes: dict[str, int] = {}
+    for e in elements:
+        sec = e.get("section")
+        if sec and sec not in sections:
+            sections.append(sec)
+        dt = e.get("datatype")
+        if dt:
+            datatypes[dt] = datatypes.get(dt, 0) + 1
+    findings = _findings_from_csv(load(document).to_csv())
+    return {
+        "elementCount": len(elements),
+        "sections": sections,
+        "datatypes": datatypes,
+        "valid": not any(f.level == "ERROR" for f in findings),
+        "errorCount": sum(1 for f in findings if f.level == "ERROR"),
+        "warningCount": sum(1 for f in findings if f.level == "WARNING"),
+    }
+
+
+def export(document: str, to: str = "csv") -> str:
+    """Serialise a dictionary to another format.
+
+    Args:
+        document: the dictionary in any supported format (auto-detected).
+        to: target format — "csv", "linkml" (YAML), or "json" (dd-json).
+
+    Raises:
+        ValueError: unknown target format, or malformed input.
+    """
+    dd = load(document)
+    if to == "csv":
+        return dd.to_csv()
+    if to == "linkml":
+        return dd.to_linkml(_LINKML_OPTIONS)
+    if to == "json":
+        return dd.to_json()
+    raise ValueError(f"unknown format {to!r}; expected csv, linkml, or json")
