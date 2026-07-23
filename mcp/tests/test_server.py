@@ -1,4 +1,8 @@
-"""Tests for the dd-edit MCP spike: core directly, then over the protocol."""
+"""Tests for the dd-edit MCP tools: functions directly, then over the protocol.
+
+The shared primitives (detect, load, validate) are tested in ../../core; this
+suite covers the MCP-specific query/author tools and the protocol wiring.
+"""
 
 from __future__ import annotations
 
@@ -27,23 +31,6 @@ SECTIONED_CSV = (
     "sex,Sex,integer,single,Demographics,\n"
     "weight,Weight,float,single,Vitals,kg\n"
 )
-
-
-def test_core_detects_formats():
-    assert core.detect(VALID_CSV) == "csv"
-    assert core.detect('{"format":"dd-json"}') == "json"
-    assert core.detect("classes:\n  X: {}\n") == "linkml"
-
-
-def test_core_flags_unknown_datatype():
-    findings = core.validate_document(BAD_CSV)
-    assert any(f.level == "ERROR" and "datatype" in f.check for f in findings)
-
-
-def test_core_valid_document_has_no_errors():
-    # INFO/WARNING findings are allowed; only ERRORs make a document invalid.
-    findings = core.validate_document(VALID_CSV)
-    assert not [f for f in findings if f.level == "ERROR"]
 
 
 def test_add_element_appends_and_normalises():

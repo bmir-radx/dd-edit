@@ -189,11 +189,13 @@ dd-edit/
 │   ├── main/               # Electron main process (sidecar lifecycle, file I/O)
 │   ├── preload/            # context bridge
 │   └── renderer/           # React UI
-├── core/                   # dd-edit-core: shared detect/load/validate (transport-free)
-│   └── dd_edit_core/       #   the foundation consumers sit on; dd-* pinned here
-└── sidecar/
-    ├── pyproject.toml      # depends on dd-edit-core + dd-printer/dd-redcap
-    └── dd_edit_sidecar/    # FastAPI app
+├── core/                   # dd-edit-core: shared detect/load/validate (no FastAPI/MCP)
+│   └── dd_edit_core/       #   the transport-free foundation; dd-* pinned here
+├── sidecar/
+│   ├── pyproject.toml      # depends on dd-edit-core + dd-printer/dd-redcap
+│   └── dd_edit_sidecar/    # FastAPI app
+└── mcp/                    # dd-edit-mcp: MCP server (see docs/MCP-DESIGN.md)
+    └── dd_edit_mcp/        #   depends on dd-edit-core; validate/query/author tools
 ```
 
 ## Decisions log

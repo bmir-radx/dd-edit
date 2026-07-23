@@ -10,14 +10,16 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "BSD-2-Clause" }
 dependencies = [
-    # Same toolkit the app's sidecar consumes, pinned to the same released tag
-    # so the MCP and the app agree on parsing/validation behaviour. Bump
-    # deliberately, in step with sidecar/pyproject.toml.
-    "dd-api @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=api",
-    "dd-validate @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=validator",
+    # The shared core carries the pinned dd-* toolkit (and format sniffing), so
+    # the MCP and the app agree on parsing/validation behaviour from one place.
+    "dd-edit-core",
     "mcp>=1.2",
-    "pyyaml",  # format sniffing
 ]
+
+# Local path to the shared core for development installs. A published build
+# would depend on a released dd-edit-core instead.
+[tool.uv.sources]
+dd-edit-core = { path = "../core", editable = true }
 
 [project.optional-dependencies]
 test = ["pytest>=7", "pytest-asyncio>=0.23"]
