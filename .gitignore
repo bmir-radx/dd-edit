@@ -20,4 +20,7 @@ verify-typing.cjs
 
 # Packaging
 release/
+# Python build dirs, per package. NOT a blanket "build/": the repo-root build/
+# holds the app icons and is tracked.
 sidecar/build/
+core/build/
