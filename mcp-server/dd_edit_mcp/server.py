@@ -72,7 +72,12 @@ def validate_dictionary(content: str) -> dict:
 
 
 @mcp.tool()
-def add_element(content: str, element: dict, index: int | None = None) -> dict:
+def add_element(
+    content: str,
+    element: dict,
+    index: int | None = None,
+    compact: bool = False,
+) -> dict:
     """Add a data element to a dictionary; return the updated document + findings.
 
     Inserts a new element and returns the whole updated dictionary as dd-json,
@@ -101,6 +106,10 @@ def add_element(content: str, element: dict, index: int | None = None) -> dict:
             provenance, see_also, aliases, terms. Unknown keys are rejected.
             See "Field shapes" below for the ones that are not plain strings.
         index: 0-based position to insert at; omit to append at the end.
+        compact: Return the document with null/empty fields omitted — roughly
+            half the size on a typical dictionary, and accepted as input by every
+            tool here, so it is the cheaper way to carry a document across
+            several calls. Lossless. Leave false when producing a file to save.
 
     Field shapes:
         enumeration, missing_value_codes: a list of code objects,
@@ -120,7 +129,7 @@ def add_element(content: str, element: dict, index: int | None = None) -> dict:
           - valid: true if there are no ERROR-level findings
           - findings: list of findings (same shape as validate_dictionary)
     """
-    result = core.add_element(content, element, index=index)
+    result = core.add_element(content, element, index=index, compact=compact)
     return {
         "document": result.document,
         "valid": not any(f.level == "ERROR" for f in result.findings),
@@ -129,7 +138,12 @@ def add_element(content: str, element: dict, index: int | None = None) -> dict:
 
 
 @mcp.tool()
-def edit_element(content: str, element_id: str, changes: dict) -> dict:
+def edit_element(
+    content: str,
+    element_id: str,
+    changes: dict,
+    compact: bool = False,
+) -> dict:
     """Change fields on one element; return the updated document + findings.
 
     Edits a single element in place and returns the whole updated dictionary as
@@ -168,6 +182,10 @@ def edit_element(content: str, element_id: str, changes: dict) -> dict:
             notes, provenance, see_also, aliases, terms. Unknown keys are
             rejected. id, label, and datatype are required fields and cannot be
             cleared.
+        compact: Return the document with null/empty fields omitted — roughly
+            half the size on a typical dictionary, and accepted as input by every
+            tool here, so it is the cheaper way to carry a document across
+            several calls. Lossless. Leave false when producing a file to save.
 
     Field shapes:
         enumeration, missing_value_codes: a list of code objects,
@@ -212,7 +230,7 @@ def edit_element(content: str, element_id: str, changes: dict) -> dict:
           - valid: true if there are no ERROR-level findings
           - findings: list of findings (same shape as validate_dictionary)
     """
-    result = core.edit_element(content, element_id, changes)
+    result = core.edit_element(content, element_id, changes, compact=compact)
     return {
         "document": result.document,
         "valid": not any(f.level == "ERROR" for f in result.findings),
@@ -225,6 +243,7 @@ def remove_element(
     content: str,
     element_id: str | None = None,
     index: int | None = None,
+    compact: bool = False,
 ) -> dict:
     """Delete one element; return the updated document + findings.
 
@@ -255,6 +274,10 @@ def remove_element(
         element_id: The id of the element to remove.
         index: 0-based position of the element to remove. Use this to
             disambiguate a duplicated id, or on its own to remove by position.
+        compact: Return the document with null/empty fields omitted — roughly
+            half the size on a typical dictionary, and accepted as input by every
+            tool here, so it is the cheaper way to carry a document across
+            several calls. Lossless. Leave false when producing a file to save.
 
     Returns:
         A dict with:
@@ -262,7 +285,7 @@ def remove_element(
           - valid: true if there are no ERROR-level findings
           - findings: list of findings (same shape as validate_dictionary)
     """
-    result = core.remove_element(content, element_id, index=index)
+    result = core.remove_element(content, element_id, index=index, compact=compact)
     return {
         "document": result.document,
         "valid": not any(f.level == "ERROR" for f in result.findings),
@@ -271,7 +294,9 @@ def remove_element(
 
 
 @mcp.tool()
-def reorder_elements(content: str, order: list[str]) -> dict:
+def reorder_elements(
+    content: str, order: list[str], compact: bool = False
+) -> dict:
     """Reorder a dictionary's elements; return the updated document + findings.
 
     Changes only the sequence of the elements — nothing about any element itself.
@@ -293,6 +318,10 @@ def reorder_elements(content: str, order: list[str]) -> dict:
             auto-detected). The returned document is always dd-json.
         order: Every element id, in the desired order. Must be an exact
             permutation of the ids in the document.
+        compact: Return the document with null/empty fields omitted — roughly
+            half the size on a typical dictionary, and accepted as input by every
+            tool here, so it is the cheaper way to carry a document across
+            several calls. Lossless. Leave false when producing a file to save.
 
     Returns:
         A dict with:
@@ -300,7 +329,7 @@ def reorder_elements(content: str, order: list[str]) -> dict:
           - valid: true if there are no ERROR-level findings
           - findings: list of findings (same shape as validate_dictionary)
     """
-    result = core.reorder_elements(content, order)
+    result = core.reorder_elements(content, order, compact=compact)
     return {
         "document": result.document,
         "valid": not any(f.level == "ERROR" for f in result.findings),
@@ -313,6 +342,7 @@ def import_redcap(
     content: str,
     provenance: str = "",
     allow_duplicates: bool = False,
+    compact: bool = False,
 ) -> dict:
     """Convert a REDCap data-dictionary export into a dd-json dictionary.
 
@@ -339,6 +369,10 @@ def import_redcap(
             every form. Leave false to have a repeated variable name rejected; set
             true to keep the first occurrence and drop the rest — that loses data
             silently, so check `elementCount` against what you expected.
+        compact: Return the document with null/empty fields omitted — roughly
+            half the size on a typical dictionary, and accepted as input by every
+            tool here, so it is the cheaper way to carry a document across
+            several calls. Lossless. Leave false when producing a file to save.
 
     Returns:
         A dict with:
@@ -349,7 +383,10 @@ def import_redcap(
           - findings: list of findings (same shape as validate_dictionary)
     """
     result = core.import_redcap(
-        content, provenance=provenance, allow_duplicates=allow_duplicates
+        content,
+        provenance=provenance,
+        allow_duplicates=allow_duplicates,
+        compact=compact,
     )
     return {
         "document": result.document,
@@ -457,17 +494,26 @@ def describe_dictionary(content: str) -> dict:
 
 
 @mcp.tool()
-def export(content: str, to: str = "csv") -> dict:
+def export(content: str, to: str = "csv", compact: bool = False) -> dict:
     """Serialise a dictionary to another format.
 
     Args:
         content: The dictionary in any supported format (auto-detected).
         to: Target format — "csv", "linkml" (YAML), or "json" (dd-json).
+        compact: dd-json only — omit fields that are null or empty. Typically
+            about a third the size on a sparse dictionary, and lossless: it
+            reloads to the same document, and every tool here accepts it as
+            input. Use it when you want to hold a dictionary in context across
+            several calls. Leave it false when producing a file to save, since
+            the app writes the full form.
 
     Returns:
         {format, content} where content is the serialised dictionary text.
     """
-    return {"format": to, "content": core.export(content, to)}
+    return {
+        "format": to,
+        "content": core.export(content, to, compact=compact),
+    }
 
 
 def main() -> None:

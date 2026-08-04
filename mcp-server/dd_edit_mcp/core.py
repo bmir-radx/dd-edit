@@ -56,7 +56,7 @@ class EditResult:
     findings: list[Finding]
 
 
-def _apply(doc: dict, what: str) -> EditResult:
+def _apply(doc: dict, what: str, *, compact: bool = False) -> EditResult:
     """Round-trip an edited dd-json dict through the toolkit; re-validate.
 
     The tail shared by every editing tool. The toolkit normalises the document
@@ -69,6 +69,10 @@ def _apply(doc: dict, what: str) -> EditResult:
     ReadError (a ValueError) addressed to a line of the CSV round-trip the caller
     never saw. Re-raise those as `<what>: <reason>` so the message names the edit
     the caller actually made. Values the model *can* hold stay findings.
+
+    `compact` omits null/empty fields from the returned document. Validation is
+    unaffected — findings come from the CSV serialisation either way — so this
+    only changes how much text the caller carries between calls.
     """
     try:
         dd = DataDictionary.from_json(json.dumps(doc), **ALLOW_DUPLICATE_IDS)
@@ -77,7 +81,10 @@ def _apply(doc: dict, what: str) -> EditResult:
         # serialization, so quoting it at the caller is worse than saying nothing.
         reason = re.sub(r"^Line \d+:\s*", "", str(exc))
         raise ValueError(f"{what}: {reason}") from exc
-    return EditResult(document=dd.to_json(), findings=findings_from_csv(dd.to_csv()))
+    return EditResult(
+        document=dd.to_json(compact=compact),
+        findings=findings_from_csv(dd.to_csv()),
+    )
 
 
 def add_element(
@@ -85,6 +92,7 @@ def add_element(
     element: dict,
     *,
     index: int | None = None,
+    compact: bool = False,
 ) -> EditResult:
     """Add a data element to a dictionary and return the new document + findings.
 
@@ -99,6 +107,9 @@ def add_element(
         element: the new element. `id` is required; `label`, `datatype`, and
             `cardinality` are strongly recommended. Unknown keys are rejected.
         index: 0-based insertion position; None (default) appends at the end.
+        compact: return the document with null/empty fields omitted — about
+            half the size on a typical dictionary, and accepted as input by every
+            tool here. Lossless: it reloads to the same document.
 
     Returns:
         EditResult(document=<new dd-json text>, findings=<validation findings>).
@@ -134,13 +145,15 @@ def add_element(
     elements.insert(pos, dict(element))
     doc["elements"] = elements
 
-    return _apply(doc, f"cannot add element {element['id']!r}")
+    return _apply(doc, f"cannot add element {element['id']!r}", compact=compact)
 
 
 def edit_element(
     document: str,
     element_id: str,
     changes: dict,
+    *,
+    compact: bool = False,
 ) -> EditResult:
     """Change fields on one element and return the new document + findings.
 
@@ -163,6 +176,9 @@ def edit_element(
             the first occurrence is edited.
         changes: the fields to change. Unknown keys are rejected. Pass null to
             clear an optional field; omit a key to leave it as it is.
+        compact: return the document with null/empty fields omitted — about
+            half the size on a typical dictionary, and accepted as input by every
+            tool here. Lossless: it reloads to the same document.
 
     Returns:
         EditResult(document=<new dd-json text>, findings=<validation findings>).
@@ -207,7 +223,8 @@ def edit_element(
 
     offending = ", ".join(f"{k}={changes[k]!r}" for k in sorted(changes))
     return _apply(
-        doc, f"cannot apply {{{offending}}} to element {element_id!r}"
+        doc, f"cannot apply {{{offending}}} to element {element_id!r}",
+        compact=compact,
     )
 
 
@@ -216,6 +233,7 @@ def remove_element(
     element_id: str | None = None,
     *,
     index: int | None = None,
+    compact: bool = False,
 ) -> EditResult:
     """Delete one element and return the new document + findings.
 
@@ -243,6 +261,9 @@ def remove_element(
         document: the current dictionary as dd-json text.
         element_id: the id of the element to remove.
         index: 0-based position of the element to remove.
+        compact: return the document with null/empty fields omitted — about
+            half the size on a typical dictionary, and accepted as input by every
+            tool here. Lossless: it reloads to the same document.
 
     Returns:
         EditResult(document=<new dd-json text>, findings=<validation findings>).
@@ -291,10 +312,12 @@ def remove_element(
     removed = elements.pop(target)
     doc["elements"] = elements
 
-    return _apply(doc, f"cannot remove element {removed.get('id')!r}")
+    return _apply(doc, f"cannot remove element {removed.get('id')!r}", compact=compact)
 
 
-def reorder_elements(document: str, order: list[str]) -> EditResult:
+def reorder_elements(
+    document: str, order: list[str], *, compact: bool = False
+) -> EditResult:
     """Reorder a dictionary's elements and return the new document + findings.
 
     Pure: the input document is not mutated. Nothing about any element changes —
@@ -317,6 +340,9 @@ def reorder_elements(document: str, order: list[str]) -> EditResult:
     Args:
         document: the current dictionary as dd-json text.
         order: every element id, in the desired order.
+        compact: return the document with null/empty fields omitted — about
+            half the size on a typical dictionary, and accepted as input by every
+            tool here. Lossless: it reloads to the same document.
 
     Returns:
         EditResult(document=<new dd-json text>, findings=<validation findings>).
@@ -362,7 +388,7 @@ def reorder_elements(document: str, order: list[str]) -> EditResult:
     by_id = {e.get("id"): e for e in elements}
     doc["elements"] = [by_id[i] for i in order]
 
-    return _apply(doc, "cannot reorder elements")
+    return _apply(doc, "cannot reorder elements", compact=compact)
 
 
 def import_redcap(
@@ -370,6 +396,7 @@ def import_redcap(
     *,
     provenance: str = "",
     allow_duplicates: bool = False,
+    compact: bool = False,
 ) -> EditResult:
     """Convert a REDCap data-dictionary export into a dd-json document.
 
@@ -392,6 +419,9 @@ def import_redcap(
             on every form. False (default) rejects a repeated variable name; True
             keeps the *first* occurrence and silently drops the rest, so compare
             `elementCount` against what you expected.
+        compact: return the document with null/empty fields omitted — about
+            half the size on a typical dictionary, and accepted as input by every
+            tool here. Lossless: it reloads to the same document.
 
     Returns:
         EditResult(document=<new dd-json text>, findings=<validation findings>).
@@ -418,7 +448,11 @@ def import_redcap(
 
     # Round-trip through _apply for the same normalise-and-validate tail every
     # editing tool uses, so an imported document is validated identically.
-    return _apply(json.loads(dd.to_json()), "cannot convert REDCap dictionary")
+    return _apply(
+        json.loads(dd.to_json()),
+        "cannot convert REDCap dictionary",
+        compact=compact,
+    )
 
 
 # Cap on one lookup_terms call, matching the sidecar's /terms endpoint: one
@@ -554,12 +588,17 @@ def describe_dictionary(document: str) -> dict:
     }
 
 
-def export(document: str, to: str = "csv") -> str:
+def export(document: str, to: str = "csv", *, compact: bool = False) -> str:
     """Serialise a dictionary to another format.
 
     Args:
         document: the dictionary in any supported format (auto-detected).
         to: target format — "csv", "linkml" (YAML), or "json" (dd-json).
+        compact: dd-json only — omit fields that are null or empty. The result
+            reloads to an identical document (the omitted fields are exactly the
+            ones `load` fills back in), so this is lossless, but it is a wire
+            convenience rather than a storage format: the app always writes the
+            full form. Ignored for csv/linkml.
 
     Raises:
         ValueError: unknown target format, or malformed input.
@@ -570,5 +609,5 @@ def export(document: str, to: str = "csv") -> str:
     if to == "linkml":
         return dd.to_linkml(LINKML_OPTIONS)
     if to == "json":
-        return dd.to_json()
+        return dd.to_json(compact=compact)
     raise ValueError(f"unknown format {to!r}; expected csv, linkml, or json")
