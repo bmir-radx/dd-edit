@@ -210,6 +210,89 @@ def edit_element(
     )
 
 
+def remove_element(
+    document: str,
+    element_id: str | None = None,
+    *,
+    index: int | None = None,
+) -> EditResult:
+    """Delete one element and return the new document + findings.
+
+    Pure: the input document is not mutated. Exactly one element is removed; the
+    order of the rest is preserved (order is semantic — it is the field order in
+    the target datafile).
+
+    Address the element by `element_id`, by `index`, or both (both = "the element
+    at this index, which must have this id" — a safety belt worth using if the
+    caller is working from a stale listing).
+
+    A dictionary can hold duplicate ids (the validator flags it, the model
+    tolerates it), which makes an id ambiguous. Unlike `get_element` and
+    `edit_element`, which act on the first match, removal *refuses* rather than
+    guessing: a wrong edit is visible in the returned document, but a wrong
+    delete just silently leaves fewer elements, and a stateless tool has no undo.
+    Pass `index` to disambiguate.
+
+    Removing an element other elements refer to (e.g. in a `precondition`) leaves
+    that reference dangling; the validator reports it as an
+    `unknown-precondition-field` ERROR in the returned findings. Removing the
+    last element is allowed and yields a valid empty dictionary.
+
+    Args:
+        document: the current dictionary as dd-json text.
+        element_id: the id of the element to remove.
+        index: 0-based position of the element to remove.
+
+    Returns:
+        EditResult(document=<new dd-json text>, findings=<validation findings>).
+
+    Raises:
+        ValueError: the document is malformed, neither `element_id` nor `index`
+            was given, `index` is out of range, no element matches, or
+            `element_id` is ambiguous (several elements share it) — the message
+            lists the matching positions so the caller can retry with `index`.
+    """
+    if element_id is None and index is None:
+        raise ValueError("pass element_id, index, or both: nothing identified")
+
+    doc = json.loads(load(document).to_json())
+    elements = doc.get("elements", [])
+
+    if index is not None and not 0 <= index < len(elements):
+        raise ValueError(
+            f"index {index} out of range for {len(elements)} element(s)"
+        )
+
+    if element_id is None:
+        target = index
+    else:
+        matches = [i for i, e in enumerate(elements) if e.get("id") == element_id]
+        if not matches:
+            raise ValueError(f"no element with id {element_id!r}")
+        if index is None:
+            if len(matches) > 1:
+                positions = ", ".join(str(i) for i in matches)
+                raise ValueError(
+                    f"{len(matches)} elements have id {element_id!r} "
+                    f"(positions {positions}); pass index to choose one"
+                )
+            target = matches[0]
+        else:
+            # Both given: the index wins, but only if it really is that element.
+            if index not in matches:
+                actual = elements[index].get("id")
+                raise ValueError(
+                    f"element at index {index} has id {actual!r}, "
+                    f"not {element_id!r}"
+                )
+            target = index
+
+    removed = elements.pop(target)
+    doc["elements"] = elements
+
+    return _apply(doc, f"cannot remove element {removed.get('id')!r}")
+
+
 # ------------------------------------------------------------------ queries
 #
 # Read-only tools. They work off the dd-json dict (load(...).to_json()) rather

@@ -3,12 +3,12 @@
 An [MCP](https://modelcontextprotocol.io) server exposing RADx data-dictionary
 tools to an LLM. Design: [../docs/MCP-DESIGN.md](../docs/MCP-DESIGN.md).
 
-**Status: phase 1 in progress.** Seven tools covering the three phase-1 use
+**Status: phase 1 in progress.** Eight tools covering the three phase-1 use
 cases — validate, query, and author. All stateless: pure functions over a
-document passed in each call. The editing tools (`add_element`, `edit_element`)
-use the `(document, op) → (document, findings)` shape that must survive into the
-later session/live-app phases (phases 2–3 in the design doc). Still to come from
-the design doc's inventory: `remove_element`, `reorder_elements`, `render_html`,
+document passed in each call. The editing tools (`add_element`, `edit_element`,
+`remove_element`) use the `(document, op) → (document, findings)` shape that must
+survive into the later session/live-app phases (phases 2–3 in the design doc).
+Still to come from the design doc's inventory: `reorder_elements`, `render_html`,
 `lookup_terms`, `import_redcap`.
 
 ## Layout
@@ -80,6 +80,7 @@ auto-detected).
 | `export` | query | Serialise to `csv` / `linkml` / `json`; `{format, content}`. |
 | `add_element` | author | Insert an element (order-aware via `index`); returns `{document, valid, findings}`. Pure — the input is not modified. |
 | `edit_element` | author | Change fields on one element by id; returns `{document, valid, findings}`. Pure. Omitted key = leave alone, `null` = clear, `{"id": ...}` = rename. |
+| `remove_element` | author | Delete one element by id and/or index; returns `{document, valid, findings}`. Pure. Refuses an ambiguous (duplicated) id rather than guessing. |
 
 Patch semantics for `edit_element` follow the app's editing model, so an LLM edit
 and a human edit mean the same thing: the app stores a cleared optional scalar as

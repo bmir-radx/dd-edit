@@ -160,6 +160,56 @@ def edit_element(content: str, element_id: str, changes: dict) -> dict:
 
 
 @mcp.tool()
+def remove_element(
+    content: str,
+    element_id: str | None = None,
+    index: int | None = None,
+) -> dict:
+    """Delete one element; return the updated document + findings.
+
+    Removes exactly one element and returns the whole updated dictionary as
+    dd-json, with fresh validation findings. The order of the remaining elements
+    is preserved. The input is not modified; use the returned `document` as the
+    input to further edits.
+
+    Identify the element by `element_id`, by `index`, or both — passing both means
+    "the element at this index, which must have this id", which is worth doing if
+    you are working from a listing that might be stale.
+
+    If several elements share the id, this refuses rather than guessing which you
+    meant, and the error lists the matching positions so you can retry with
+    `index`. (Duplicate ids are invalid but possible; other tools act on the first
+    match, but a wrong deletion is not visible in the result the way a wrong edit
+    is.)
+
+    Deleting an element that others refer to — e.g. a `precondition` reading
+    "age >= 18" when you delete `age` — leaves that reference dangling. The text
+    is not rewritten; it comes back as an `unknown-precondition-field` ERROR in
+    findings, so check them after removing anything referenced elsewhere.
+    Removing the last element is allowed and leaves a valid empty dictionary.
+
+    Args:
+        content: The current dictionary (dd-json, LinkML YAML, or CSV,
+            auto-detected). The returned document is always dd-json.
+        element_id: The id of the element to remove.
+        index: 0-based position of the element to remove. Use this to
+            disambiguate a duplicated id, or on its own to remove by position.
+
+    Returns:
+        A dict with:
+          - document: the updated dictionary as dd-json text
+          - valid: true if there are no ERROR-level findings
+          - findings: list of findings (same shape as validate_dictionary)
+    """
+    result = core.remove_element(content, element_id, index=index)
+    return {
+        "document": result.document,
+        "valid": not any(f.level == "ERROR" for f in result.findings),
+        "findings": [f.as_dict() for f in result.findings],
+    }
+
+
+@mcp.tool()
 def list_elements(
     content: str,
     section: str | None = None,

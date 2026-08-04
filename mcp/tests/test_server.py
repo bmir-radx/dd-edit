@@ -195,6 +195,102 @@ def test_edit_element_refuses_to_clear_required_fields():
             core.edit_element(SECTIONED_CSV, "age", {field: None})
 
 
+# A dictionary the model tolerates but the validator flags: two elements share an
+# id, so addressing one of them by id alone is ambiguous.
+DUPLICATE_ID_CSV = (
+    "Id,Label,Datatype,Cardinality\n"
+    "age,Age A,integer,single\n"
+    "age,Age B,integer,single\n"
+    "sex,Sex,integer,single\n"
+)
+
+# 'weight' depends on 'age', so removing or renaming 'age' orphans the reference.
+REFERENCING_CSV = (
+    "Id,Label,Datatype,Cardinality,Precondition\n"
+    "age,Age,integer,single,\n"
+    "weight,Weight,float,single,age > 18\n"
+)
+
+
+def test_remove_element_by_id_and_by_index():
+    by_id = core.remove_element(SECTIONED_CSV, "sex")
+    assert _ids(by_id.document) == ["age", "weight"]
+
+    by_index = core.remove_element(SECTIONED_CSV, index=0)
+    assert _ids(by_index.document) == ["sex", "weight"]
+
+    # Both together: the index must really be that element.
+    both = core.remove_element(SECTIONED_CSV, "weight", index=2)
+    assert _ids(both.document) == ["age", "sex"]
+
+
+def test_remove_element_does_not_mutate_input():
+    before = SECTIONED_CSV
+    core.remove_element(SECTIONED_CSV, "age")
+    assert SECTIONED_CSV == before  # pure: caller's document untouched
+
+
+def test_remove_element_refuses_an_ambiguous_id():
+    # The decision that distinguishes this from edit_element: a wrong delete is
+    # invisible in the result, so guessing is not acceptable.
+    with pytest.raises(ValueError, match="2 elements have id") as exc:
+        core.remove_element(DUPLICATE_ID_CSV, "age")
+    assert "positions 0, 1" in str(exc.value)
+    assert "index" in str(exc.value)  # tells the caller how to disambiguate
+
+    # ...and index resolves it, removing exactly the one asked for.
+    second = core.remove_element(DUPLICATE_ID_CSV, "age", index=1)
+    labels = [e["label"] for e in json.loads(second.document)["elements"]]
+    assert labels == ["Age A", "Sex"]
+
+
+def test_remove_element_rejects_index_id_mismatch():
+    with pytest.raises(ValueError, match="has id 'sex', not 'age'"):
+        core.remove_element(SECTIONED_CSV, "age", index=1)
+
+
+def test_remove_element_rejects_no_target_unknown_id_and_bad_index():
+    with pytest.raises(ValueError, match="nothing identified"):
+        core.remove_element(SECTIONED_CSV)
+    with pytest.raises(ValueError, match="no element with id"):
+        core.remove_element(SECTIONED_CSV, "nope")
+    with pytest.raises(ValueError, match="out of range"):
+        core.remove_element(SECTIONED_CSV, index=99)
+    with pytest.raises(ValueError, match="out of range"):
+        core.remove_element(SECTIONED_CSV, index=-1)
+
+
+def test_remove_element_orphans_a_reference_as_a_finding():
+    # The reference text is not rewritten; the caller learns via findings.
+    result = core.remove_element(REFERENCING_CSV, "age")
+    assert _ids(result.document) == ["weight"]
+    assert any(f.check == "unknown-precondition-field" and f.level == "ERROR"
+               for f in result.findings)
+
+
+def test_remove_last_element_yields_a_valid_empty_dictionary():
+    doc = SECTIONED_CSV
+    for element_id in ("age", "sex", "weight"):
+        doc = core.remove_element(doc, element_id).document
+    assert json.loads(doc)["elements"] == []
+    assert core.describe_dictionary(doc)["elementCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_element_over_mcp():
+    async with connect() as client:
+        assert "remove_element" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        res = await client.call_tool("remove_element", {
+            "content": SECTIONED_CSV, "element_id": "sex",
+        })
+        payload = json.loads(res.content[0].text)
+        assert _ids(payload["document"]) == ["age", "weight"]
+        assert payload["valid"] is True
+
+
 @pytest.mark.asyncio
 async def test_edit_element_over_mcp():
     async with connect() as client:

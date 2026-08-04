@@ -112,7 +112,7 @@ already does this, so each is a known quantity.
 | --- | --- | --- |
 | `add_element` | model mutation + re-validate | append/insert an element; returns new doc + findings |
 | `edit_element` | model mutation + re-validate | change fields on an element by id |
-| `remove_element` | model mutation + re-validate | delete an element by id |
+| `remove_element` | model mutation + re-validate | delete an element by id and/or index (refuses an ambiguous id) |
 | `reorder_elements` | model mutation | change element order (order is semantic — see DESIGN.md) |
 | `lookup_terms` | `dd_core.terms_lookup.lookup_labels` (`POST /terms`) | resolve unit/CDE IRIs → labels for suggestions |
 | `import_redcap` | `dd_redcap.convert_redcap` (`POST /import/redcap`) | REDCap export CSV → dd-json document |
@@ -130,8 +130,19 @@ Notes:
   the offending change rather than a line of the internal CSV round-trip. Worth
   revisiting if the toolkit ever gains a lenient-datatype parse.
   Every editing tool shares this round-trip tail (`core._apply`) so the rule is
-  stated once and the tools cannot drift apart — `remove_element` and
-  `reorder_elements` should use it too.
+  stated once and the tools cannot drift apart — `remove_element` uses it too, and
+  `reorder_elements` should.
+- **Destructive tools refuse ambiguity instead of taking the first match.**
+  `get_element` and `edit_element` act on the first element with a given id,
+  which is fine because a duplicate id is visible in the document they return and
+  a wrong edit can be re-edited. `remove_element` refuses and reports the
+  matching positions, because a wrong deletion leaves no trace in the result and
+  a stateless tool has no undo stack to fall back on. `index` is the
+  disambiguator, matching the app, whose delete/insert/move/setField primitives
+  are all index-based (`document.ts` `deleteElements(doc, indices)`) — an id is
+  the natural handle for an LLM, so the MCP takes ids and treats index as the
+  precise address. Passing both is an assertion: "this index, which must have
+  this id" — worth it against a stale listing.
 - **`ElementPatch` semantics** (decided for `edit_element`, applies to any later
   patch-shaped tool): an omitted key leaves the field untouched, an explicit
   `null` clears it, `[]` clears a list. This mirrors the app, which stores a
@@ -240,10 +251,15 @@ Not solved now — flagged so phase-1/2 choices leave room.
 
 - Is `render_html` worth exposing to an LLM, or is it a human-facing artifact
   better left to the app? (Include but low priority.)
-- Should a rename (`edit_element` with `{"id": ...}`) offer to rewrite references
-  to the old id (e.g. in a `precondition`)? Today it does not, and a dangling
-  reference surfaces as a finding. A `rename_element` tool that fixes references
-  is the obvious follow-up if that turns out to bite in practice.
+- Should a rename (`edit_element` with `{"id": ...}`) or a removal offer to
+  rewrite references to the old id (e.g. in a `precondition`)? Today neither does:
+  the reference text is left alone and the orphan surfaces as an
+  `unknown-precondition-field` ERROR. **The app behaves the same way** — its
+  `deleteElements` and id-`setField` touch nothing else, and the stale reference
+  is only flagged later, when the user happens to open that other element's
+  precondition field (`precondition.ts` `analyze`). So the MCP is consistent with
+  the app rather than worse than it, and a reference-fixing `rename_element` would
+  be a *new* capability for both. Worth doing if it bites in practice.
 
 ## Decisions log
 
@@ -258,3 +274,4 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Edit input format | any format in (auto-detected), dd-json out | one rule for every tool is less to explain to an LLM than "edits are dd-json-only"; the round-trip normalises anyway |
 | Shared core | factored into `dd-edit-core` | one place for parse/validate + the feature-detected toolkit knobs; the sidecar and MCP can't drift |
 | Patch semantics | omit = leave, `null` = clear, `[]` = clear list | matches the app exactly, so LLM and human edits mean the same thing |
+| Ambiguous id on delete | refuse, report positions, offer `index` | a wrong delete is invisible in the result and there is no undo; a wrong edit is neither |
