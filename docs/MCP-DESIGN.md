@@ -222,6 +222,19 @@ Not solved now — flagged so phase-1/2 choices leave room.
   server; optionally a `uvx` one-liner for zero-install trial.
 - Tool descriptions and parameter schemas are the actual product surface for
   adoption — an LLM must use them without reading source. Budget real effort here.
+- **Bound the MCP SDK dependency at the major** (`mcp>=2,<3`). The original
+  `mcp>=1.2` was unbounded, so SDK 2.0 — which renamed `fastmcp.FastMCP` to
+  `mcpserver.MCPServer` and dropped `shared.memory`'s test helper — was resolved
+  by a fresh `pip install` and the server failed to import on arrival, while
+  every existing venv kept working. That failure mode is invisible to whoever
+  wrote the pin, which is the argument for the bound rather than for vigilance.
+- The console entry point reports its version from package metadata
+  (`importlib.metadata`), so a client's handshake shows something meaningful
+  instead of an empty string. Keep that in step with `pyproject.toml`'s version.
+- This package directory is named `mcp/` and therefore shadows the `mcp` library
+  for any tool that puts the repo root on `sys.path` (`uv run` from the root is
+  the one that bites). Worth renaming the directory if the MCP becomes the
+  primary artifact; harmless while venv-based invocation is the documented path.
 
 ## Open questions
 

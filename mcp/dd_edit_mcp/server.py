@@ -1,20 +1,31 @@
-"""dd-edit MCP server (phase-1 spike).
+"""dd-edit MCP server (phase 1).
 
-Exposes data-dictionary capabilities to an MCP client over stdio. This spike
-ships a single tool, validate_dictionary, to prove the toolkit runs outside
-FastAPI and that the MCP plumbing works end to end. See docs/MCP-DESIGN.md for
-the full planned tool inventory.
+Exposes data-dictionary capabilities to an MCP client over stdio: validate,
+query, and author. Each tool is a thin wrapper adding the MCP-facing docstring
+and result shape over a pure function in core; see docs/MCP-DESIGN.md for the
+full planned inventory and the phase plan.
+
+The tool docstrings are the product surface — an LLM has to use these tools
+without reading the source, so they carry the semantics (what is required, what
+raises vs. what comes back as a finding) rather than deferring to core.
 
 Run:  python -m dd_edit_mcp.server      (stdio; wire into an MCP client)
 """
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from importlib.metadata import PackageNotFoundError, version
+
+from mcp.server.mcpserver import MCPServer
 
 from dd_edit_mcp import core
 
-mcp = FastMCP("dd-edit")
+try:
+    _VERSION = version("dd-edit-mcp")
+except PackageNotFoundError:  # running from a source tree, not installed
+    _VERSION = "0.0.0+unknown"
+
+mcp = MCPServer("dd-edit", version=_VERSION)
 
 
 @mcp.tool()
