@@ -276,6 +276,175 @@ def test_remove_last_element_yields_a_valid_empty_dictionary():
     assert core.describe_dictionary(doc)["elementCount"] == 0
 
 
+# -------------------------------------------------------------- term lookup
+#
+# lookup_terms is the only tool that leaves the process. These tests stub the
+# upstream call, so the suite stays offline and deterministic; the live path is
+# exercised by test_lookup_terms_live, which is opt-in.
+
+NCIT_AGE = "http://purl.obolibrary.org/obo/NCIT_C25150"
+
+
+@pytest.fixture
+def stub_lookup(monkeypatch):
+    """Replace the network call, recording what it was asked for."""
+    calls = []
+
+    def fake_lookup_labels(terms, **kwargs):
+        terms = list(terms)
+        calls.append({"terms": terms, "kwargs": kwargs})
+        # Resolve anything NCIT-ish; everything else is a miss.
+        return {t: "Age" for t in terms if "NCIT" in t}
+
+    import dd_core.terms_lookup as tl
+
+    monkeypatch.setattr(tl, "lookup_labels", fake_lookup_labels)
+    return calls
+
+
+def test_lookup_terms_returns_labels_and_omits_misses(stub_lookup):
+    labels = core.lookup_terms([NCIT_AGE, "http://example.org/nope"])
+    assert labels == {NCIT_AGE: "Age"}
+    # A miss is absent, not an error and not an empty string.
+    assert "http://example.org/nope" not in labels
+
+
+def test_lookup_terms_dedupes_preserving_order_and_drops_blanks(stub_lookup):
+    core.lookup_terms([NCIT_AGE, "  ", NCIT_AGE, "http://example.org/b", ""])
+    assert stub_lookup[0]["terms"] == [NCIT_AGE, "http://example.org/b"]
+
+
+def test_lookup_terms_caps_the_batch(stub_lookup):
+    core.lookup_terms([f"http://example.org/t{i}" for i in range(150)])
+    assert len(stub_lookup[0]["terms"]) == core.MAX_TERMS_PER_LOOKUP
+
+
+def test_lookup_terms_short_circuits_an_empty_request(stub_lookup):
+    assert core.lookup_terms([]) == {}
+    assert core.lookup_terms(["", "   "]) == {}
+    assert stub_lookup == []  # never called upstream
+
+
+def test_lookup_terms_wraps_a_transport_failure(monkeypatch):
+    import dd_core.terms_lookup as tl
+
+    def boom(terms, **kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(tl, "lookup_labels", boom)
+    with pytest.raises(ValueError, match="term lookup failed"):
+        core.lookup_terms([NCIT_AGE])
+
+
+def test_lookup_terms_rejects_a_non_list():
+    with pytest.raises(ValueError, match="must be a list"):
+        core.lookup_terms(NCIT_AGE)
+
+
+@pytest.mark.asyncio
+async def test_lookup_terms_over_mcp(stub_lookup):
+    async with connect() as client:
+        assert "lookup_terms" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        res = await client.call_tool("lookup_terms", {
+            "terms": [NCIT_AGE, "http://example.org/nope"],
+        })
+        payload = json.loads(res.content[0].text)
+        assert payload["labels"] == {NCIT_AGE: "Age"}
+        # The server adds the explicit miss list the raw call cannot give.
+        assert payload["unresolved"] == ["http://example.org/nope"]
+
+
+@pytest.mark.live
+def test_lookup_terms_live():
+    """The real OLS4 path. Run with: pytest -m live (needs network)."""
+    labels = core.lookup_terms([NCIT_AGE, "http://example.org/nonexistent_xyz"])
+    assert labels.get(NCIT_AGE) == "Age"
+    assert "http://example.org/nonexistent_xyz" not in labels
+
+
+# ------------------------------------------------------------ redcap import
+
+# A REDCap export's full 18-column header, as REDCap actually writes it.
+_REDCAP_HEADER = (
+    '"Variable / Field Name","Form Name","Section Header","Field Type",'
+    '"Field Label","Choices, Calculations, OR Slider Labels","Field Note",'
+    '"Text Validation Type OR Show Slider Number","Text Validation Min",'
+    '"Text Validation Max","Identifier?",'
+    '"Branching Logic (Show field only if...)","Required Field?",'
+    '"Custom Alignment","Question Number (surveys only)","Matrix Group Name",'
+    '"Matrix Ranking?","Field Annotation"\n'
+)
+REDCAP_CSV = _REDCAP_HEADER + (
+    "age,demo,Demographics,text,Age,,,integer,0,120,,,y,,,,,\n"
+    'sex,demo,,radio,Sex at birth,"1, Male | 2, Female",,,,,,,y,,,,,\n'
+    'weight,demo,,text,Weight,,kg please,number,,,,"[age] > 18",,,,,,\n'
+)
+REDCAP_DUPLICATE_CSV = _REDCAP_HEADER + (
+    "age,form1,,text,Age,,,integer,,,,,,,,,,\n"
+    "age,form2,,text,Age again,,,integer,,,,,,,,,,\n"
+)
+
+
+def test_import_redcap_converts_types_and_choices():
+    result = core.import_redcap(REDCAP_CSV, provenance="Demo study")
+    elements = json.loads(result.document)["elements"]
+
+    assert [e["id"] for e in elements] == ["age", "sex", "weight"]
+    assert elements[0]["datatype"] == "integer"
+    # A REDCap radio with choices becomes an enumeration.
+    assert [i["value"] for i in elements[1]["enumeration"]] == ["1", "2"]
+    assert [i["label"] for i in elements[1]["enumeration"]] == ["Male", "Female"]
+    # provenance is the only record of where these came from.
+    assert all(e["provenance"] == "Demo study" for e in elements)
+
+
+def test_import_redcap_drops_branching_logic():
+    # Documented as deliberate: REDCap's branching grammar is not the spec's
+    # precondition grammar, so it is dropped rather than mistranslated.
+    result = core.import_redcap(REDCAP_CSV)
+    weight = json.loads(result.document)["elements"][2]
+    assert weight["precondition"] is None
+
+
+def test_import_redcap_findings_are_the_todo_list():
+    # REDCap carries no units, so a converted numeric field is incomplete.
+    result = core.import_redcap(REDCAP_CSV)
+    assert any(f.check == "missing-unit" for f in result.findings)
+
+
+def test_import_redcap_duplicate_handling():
+    with pytest.raises(ValueError, match="duplicate"):
+        core.import_redcap(REDCAP_DUPLICATE_CSV)
+
+    # allow_duplicates keeps the FIRST occurrence and drops the rest.
+    kept = core.import_redcap(REDCAP_DUPLICATE_CSV, allow_duplicates=True)
+    elements = json.loads(kept.document)["elements"]
+    assert [e["label"] for e in elements] == ["Age"]
+
+
+def test_import_redcap_rejects_a_non_redcap_file():
+    with pytest.raises(ValueError, match="cannot convert REDCap dictionary"):
+        core.import_redcap(SECTIONED_CSV)  # a dd CSV, not a REDCap export
+
+
+@pytest.mark.asyncio
+async def test_import_redcap_over_mcp():
+    async with connect() as client:
+        assert "import_redcap" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        res = await client.call_tool("import_redcap", {
+            "content": REDCAP_CSV, "provenance": "Demo study",
+        })
+        payload = json.loads(res.content[0].text)
+        assert payload["elementCount"] == 3
+        assert _ids(payload["document"]) == ["age", "sex", "weight"]
+
+
 # --------------------------------------------------- documented tool surface
 #
 # The tool docstrings are the product surface: an LLM uses them without reading

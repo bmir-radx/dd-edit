@@ -13,6 +13,9 @@ dependencies = [
     # The shared core carries the pinned dd-* toolkit (and format sniffing), so
     # the MCP and the app agree on parsing/validation behaviour from one place.
     "dd-edit-core",
+    # The REDCap converter, beyond what the shared core carries. Pinned to the
+    # same released tag as the sidecar so both convert identically.
+    "dd-redcap @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=redcap",
     # Bounded to the 2.x major: 2.0 moved the server class (FastMCP ->
     # mcpserver.MCPServer) and dropped the in-memory test helper, so an
     # unbounded ">=" would break the imports again on the next major.
@@ -37,3 +40,7 @@ include = ["dd_edit_mcp*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# The default run stays offline and deterministic: the one test that really hits
+# OLS4 is opt-in with `pytest -m live`.
+addopts = "-m 'not live'"
+markers = ["live: needs network access (real ontology lookup)"]

@@ -309,6 +309,92 @@ def reorder_elements(content: str, order: list[str]) -> dict:
 
 
 @mcp.tool()
+def import_redcap(
+    content: str,
+    provenance: str = "",
+    allow_duplicates: bool = False,
+) -> dict:
+    """Convert a REDCap data-dictionary export into a dd-json dictionary.
+
+    Takes a REDCap data dictionary (the CSV REDCap exports, with a
+    "Variable / Field Name" column) and returns an equivalent RADx dictionary as
+    dd-json, plus validation findings. Field types become datatypes and REDCap
+    choices become enumerations.
+
+    This is a starting point, not a finished dictionary — the findings are the
+    to-do list. REDCap carries no units, so numeric fields typically come back
+    with `missing-unit`, which you can fix with `edit_element`.
+
+    REDCap's branching logic is deliberately **not** converted into a
+    `precondition`: the grammars differ and a guessed translation would be wrong
+    in ways nobody would notice. It is dropped, so re-add any conditions that
+    matter.
+
+    Args:
+        content: The REDCap data-dictionary export, as CSV text.
+        provenance: Fills every element's provenance — typically the study or
+            instrument name. Worth setting: it is the only record of where these
+            elements came from.
+        allow_duplicates: REDCap multi-form exports often repeat a shared field on
+            every form. Leave false to have a repeated variable name rejected; set
+            true to keep the first occurrence and drop the rest — that loses data
+            silently, so check `elementCount` against what you expected.
+
+    Returns:
+        A dict with:
+          - document: the converted dictionary as dd-json text
+          - elementCount: how many elements it contains (check this when
+            allow_duplicates is true)
+          - valid: true if there are no ERROR-level findings
+          - findings: list of findings (same shape as validate_dictionary)
+    """
+    result = core.import_redcap(
+        content, provenance=provenance, allow_duplicates=allow_duplicates
+    )
+    return {
+        "document": result.document,
+        "elementCount": len(core.list_elements(result.document)),
+        "valid": not any(f.level == "ERROR" for f in result.findings),
+        "findings": [f.as_dict() for f in result.findings],
+    }
+
+
+@mcp.tool()
+def lookup_terms(terms: list[str], timeout: float = 15.0) -> dict:
+    """Resolve ontology term IRIs to human-readable labels.
+
+    Use this to check what a term in an element's `terms` field actually means, or
+    to confirm an IRI is real before adding it. Unlike every other tool here, this
+    one makes a network request (to OLS4), so it can be slow and needs
+    connectivity.
+
+    A term that does not resolve is simply **absent** from `labels` rather than
+    being an error — it may be private, retired, or mistyped. Compare the keys you
+    get back against what you sent to see which failed; `unresolved` lists them
+    for you.
+
+    Up to 100 terms per call (duplicates and blanks are ignored); send more in
+    batches.
+
+    Args:
+        terms: Term IRIs to resolve, e.g.
+            ["http://purl.obolibrary.org/obo/NCIT_C25150"].
+        timeout: Seconds to wait for the lookup service.
+
+    Returns:
+        A dict with:
+          - labels: {iri: label} for the terms that resolved
+          - unresolved: the IRIs that did not resolve
+    """
+    labels = core.lookup_terms(terms, timeout=timeout)
+    asked = [t for t in dict.fromkeys(terms) if t.strip()]
+    return {
+        "labels": labels,
+        "unresolved": [t for t in asked if t not in labels],
+    }
+
+
+@mcp.tool()
 def list_elements(
     content: str,
     section: str | None = None,
