@@ -412,6 +412,14 @@ def edit_element(
         Examples: `age >= 18`, `sex = "1"`, `age >= 18 and sex <> "2"`,
         `race in {"1", "2", "3"}`, `symptoms contains "fever"`, `consent <> ""`.
 
+        `contains` is **set membership, not substring matching**: it asks whether
+        a multi-valued field (cardinality "multiple") includes a value among its
+        values. There is no substring operator — a precondition cannot express
+        "this text field mentions X", and `pattern` is not an alternative (it
+        constrains a field's *own* values, not another field's). If a user asks for
+        substring matching, say it is not expressible rather than reaching for
+        `contains`.
+
         Rules the validator enforces, so check the findings: the field ids must
         exist in this dictionary; `<` `<=` `>` `>=` need an ordered (numeric or
         temporal) datatype; `contains` needs cardinality "multiple"; and a value
