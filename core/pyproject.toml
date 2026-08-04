@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dd-edit-core"
+version = "0.0.1"
+description = "Shared data-dictionary core for dd-edit: detect, load, validate"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-2-Clause" }
+dependencies = [
+    # The toolkit, pinned to the same released tag the sidecar and MCP use.
+    # This is the single place a toolkit bump is reconciled.
+    "dd-api @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=api",
+    "dd-validate @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=validator",
+    "pyyaml",  # format sniffing
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dd_edit_core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

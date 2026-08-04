@@ -69,6 +69,11 @@ jobs:
         run: |
           python -m venv .venv
           if [ -e .venv/bin/pip ]; then PIP=.venv/bin/pip; else PIP=.venv/Scripts/pip; fi
+          # dd-edit-core must be a REGULAR (non-editable) install: PyInstaller
+          # cannot follow an editable install's import-hook shim, so an editable
+          # core is left out of the frozen binary and it crashes on import.
+          # Install it from ../core first, then the sidecar itself.
+          "$PIP" install ../core
           "$PIP" install -e ".[build]"
 
       - name: Build app bundles

@@ -189,8 +189,10 @@ dd-edit/
 │   ├── main/               # Electron main process (sidecar lifecycle, file I/O)
 │   ├── preload/            # context bridge
 │   └── renderer/           # React UI
+├── core/                   # dd-edit-core: shared detect/load/validate (transport-free)
+│   └── dd_edit_core/       #   the foundation consumers sit on; dd-* pinned here
 └── sidecar/
-    ├── pyproject.toml      # dd-* pinned to a released tag
+    ├── pyproject.toml      # depends on dd-edit-core + dd-printer/dd-redcap
     └── dd_edit_sidecar/    # FastAPI app
 ```
 

@@ -42,10 +42,18 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: sidecar/pyproject.toml
+          # Both, since the sidecar's dependencies now come from core's pin too.
+          cache-dependency-path: |
+            sidecar/pyproject.toml
+            core/pyproject.toml
 
       - name: Install sidecar with test extras
-        run: pip install -e ".[test]"
+        # dd-edit-core is a path dependency, not a published package, so it has
+        # to be installed explicitly before the sidecar that requires it —
+        # otherwise pip looks for it on PyPI and fails to resolve.
+        run: |
+          pip install -e ../core
+          pip install -e ".[test]"
 
       - name: Run tests
         run: pytest

@@ -12,16 +12,23 @@ is exempt so liveness can be probed without credentials.
 
 from __future__ import annotations
 
-import inspect
 import io
 import os
-from dataclasses import fields as dataclass_fields
 from importlib.metadata import PackageNotFoundError, version
 from typing import Literal, Optional
 
-import yaml
-from dd_api import DataDictionary, EmitOptions
+from dd_api import DataDictionary
 from dd_core import ORDERED_DATATYPES
+
+# Shared, transport-free core: format detection, loading, validation, and the
+# feature-detected toolkit knobs. The sidecar and the MCP both sit on this, so
+# they agree on how a dictionary parses and validates.
+from dd_edit_core import (
+    LINKML_OPTIONS as _LINKML_OPTIONS,
+    detect as _detect,
+    findings_from_csv,
+    load as _load,
+)
 
 try:  # the full datatype vocabulary (builtin-mapped + custom); post-v0.0.4 layout
     from dd_core.datatypes import BUILTIN_RANGES, CUSTOM_TYPES
@@ -42,23 +49,12 @@ from dd_printer.load import load_dictionary
 from dd_printer.render_html import render_html
 from dd_redcap.convert import convert_redcap
 from dd_redcap.headers import ConversionError
-from dd_validator.validate import validate as validate_csv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="dd-edit sidecar", docs_url=None, redoc_url=None)
-
-# Emit the enums section (and so the boilerplate StandardMissingValueCodes)
-# after classes in LinkML previews, so a small dictionary's rendering leads
-# with its data elements. Feature-detected: the option ships in toolkit
-# releases newer than v0.0.4, and this activates automatically on a pin bump.
-_LINKML_OPTIONS = (
-    EmitOptions(enums_last=True)
-    if any(f.name == "enums_last" for f in dataclass_fields(EmitOptions))
-    else None
-)
 
 _TOOLKIT_PACKAGES = ("dd-core", "dd-linkml", "dd-api", "dd-validate", "dd-printer", "dd-redcap")
 
@@ -96,46 +92,6 @@ def _versions() -> dict[str, str]:
         except PackageNotFoundError:  # pragma: no cover - partial installs only
             out[name] = "missing"
     return out
-
-
-def _detect(text: str) -> str:
-    """Guess the input format: 'json' (dd-json), 'linkml', or 'csv'.
-
-    Mirrors the dd-json CLI's detection so the app and CLI agree.
-    """
-    if text.lstrip().startswith("{"):
-        return "json"
-    try:
-        data = yaml.safe_load(text)
-        if isinstance(data, dict) and "classes" in data:
-            return "linkml"
-    except yaml.YAMLError:
-        pass
-    return "csv"
-
-
-# The editor must hold invalid-but-well-formed documents (duplicate Ids) so
-# the user can see and fix them — the validator flags duplicate-id as an
-# ERROR. Feature-detected: ships in toolkit releases after v0.0.4.
-_KEEP_DUPLICATES = (
-    {"keep_duplicates": True}
-    if "keep_duplicates" in inspect.signature(DataDictionary.load).parameters
-    else {}
-)
-_ALLOW_DUPLICATE_IDS = (
-    {"allow_duplicate_ids": True}
-    if "allow_duplicate_ids" in inspect.signature(DataDictionary.from_json).parameters
-    else {}
-)
-
-
-def _load(text: str) -> DataDictionary:
-    kind = _detect(text)
-    if kind == "json":
-        return DataDictionary.from_json(text, **_ALLOW_DUPLICATE_IDS)
-    if kind == "linkml":
-        return DataDictionary.from_linkml(io.StringIO(text))
-    return DataDictionary.load(io.StringIO(text), **_KEEP_DUPLICATES)
 
 
 class ConvertRequest(BaseModel):
@@ -212,33 +168,15 @@ def terms(req: TermsRequest):
 
 @app.post("/validate")
 def validate(req: ValidateRequest):
-    # The validator works on the CSV serialization; other formats are
-    # converted first. Findings carry the format-independent address
-    # (elementIndex = document-order position = grid row) since toolkit
-    # v0.0.6; line numbers remain for the CSV view. getattr keeps a dev
-    # override on an older toolkit from crashing the endpoint.
+    # The validator works on the CSV serialization; other formats are converted
+    # first. findings_from_csv (shared core) carries the format-independent
+    # address (elementIndex = document-order position = grid row).
     kind = _detect(req.content)
     try:
         csv_text = req.content if kind == "csv" else _load(req.content).to_csv()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    findings = validate_csv(io.StringIO(csv_text))
-    return {
-        "findings": [
-            {
-                "level": f.level.name,
-                "check": f.check,
-                "message": f.message,
-                "line": f.line,
-                "column": f.column,
-                "value": f.value,
-                "elementIndex": getattr(f, "element_index", None),
-                "elementId": getattr(f, "element_id", None),
-                "suggestion": getattr(f, "suggestion", None),
-            }
-            for f in findings
-        ]
-    }
+    return {"findings": [f.as_dict() for f in findings_from_csv(csv_text)]}
 
 
 @app.post("/render")
