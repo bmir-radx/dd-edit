@@ -276,6 +276,85 @@ def test_remove_last_element_yields_a_valid_empty_dictionary():
     assert core.describe_dictionary(doc)["elementCount"] == 0
 
 
+def test_reorder_elements_permutes_and_preserves_content():
+    before = json.loads(core.export(SECTIONED_CSV, "json"))["elements"]
+    result = core.reorder_elements(SECTIONED_CSV, ["weight", "age", "sex"])
+
+    assert _ids(result.document) == ["weight", "age", "sex"]
+    # Only the sequence changed: every element is byte-for-byte the same object.
+    after = json.loads(result.document)["elements"]
+    assert {e["id"]: e for e in after} == {e["id"]: e for e in before}
+    assert not [f for f in result.findings if f.level == "ERROR"]
+
+
+def test_reorder_elements_does_not_mutate_input():
+    before = SECTIONED_CSV
+    core.reorder_elements(SECTIONED_CSV, ["sex", "weight", "age"])
+    assert SECTIONED_CSV == before  # pure: caller's document untouched
+
+
+def test_reorder_elements_identity_order_is_a_no_op():
+    result = core.reorder_elements(SECTIONED_CSV, ["age", "sex", "weight"])
+    assert _ids(result.document) == ["age", "sex", "weight"]
+
+
+def test_reorder_elements_requires_an_exact_permutation():
+    # Omitting an id would silently drop it — the main thing the whole-list
+    # shape exists to prevent.
+    with pytest.raises(ValueError, match="omitted: 'weight'"):
+        core.reorder_elements(SECTIONED_CSV, ["sex", "age"])
+
+    with pytest.raises(ValueError, match="not in the document: 'nope'"):
+        core.reorder_elements(SECTIONED_CSV, ["age", "sex", "weight", "nope"])
+
+    with pytest.raises(ValueError, match="listed twice: 'age'"):
+        core.reorder_elements(SECTIONED_CSV, ["age", "age", "sex", "weight"])
+
+    with pytest.raises(ValueError, match="order must be a list"):
+        core.reorder_elements(SECTIONED_CSV, "age,sex,weight")
+
+
+def test_reorder_elements_reports_every_discrepancy_at_once():
+    # A caller fixing one problem at a time would need several round-trips.
+    with pytest.raises(ValueError) as exc:
+        core.reorder_elements(SECTIONED_CSV, ["age", "age", "nope"])
+    message = str(exc.value)
+    assert "not in the document: 'nope'" in message
+    assert "listed twice: 'age'" in message
+    assert "omitted:" in message and "'sex'" in message and "'weight'" in message
+
+
+def test_reorder_elements_refuses_a_document_with_duplicate_ids():
+    # Same reasoning as remove_element: an id that names two elements cannot
+    # express a position.
+    with pytest.raises(ValueError, match="ids must be unique") as exc:
+        core.reorder_elements(DUPLICATE_ID_CSV, ["sex", "age", "age"])
+    assert "'age'" in str(exc.value)
+
+
+def test_reorder_elements_keeps_a_dangling_reference_dangling():
+    # Reordering cannot fix or break a reference; the pre-existing finding (or
+    # lack of one) is unaffected. 'weight' still refers to 'age', which is present.
+    result = core.reorder_elements(REFERENCING_CSV, ["weight", "age"])
+    assert _ids(result.document) == ["weight", "age"]
+    assert not [f for f in result.findings if f.level == "ERROR"]
+
+
+@pytest.mark.asyncio
+async def test_reorder_elements_over_mcp():
+    async with connect() as client:
+        assert "reorder_elements" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        res = await client.call_tool("reorder_elements", {
+            "content": SECTIONED_CSV, "order": ["weight", "sex", "age"],
+        })
+        payload = json.loads(res.content[0].text)
+        assert _ids(payload["document"]) == ["weight", "sex", "age"]
+        assert payload["valid"] is True
+
+
 @pytest.mark.asyncio
 async def test_remove_element_over_mcp():
     async with connect() as client:

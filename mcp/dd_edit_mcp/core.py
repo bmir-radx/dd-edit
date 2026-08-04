@@ -293,6 +293,77 @@ def remove_element(
     return _apply(doc, f"cannot remove element {removed.get('id')!r}")
 
 
+def reorder_elements(document: str, order: list[str]) -> EditResult:
+    """Reorder a dictionary's elements and return the new document + findings.
+
+    Pure: the input document is not mutated. Nothing about any element changes —
+    only their sequence. Element order is semantic (it is the column order in the
+    target datafile, see DESIGN.md), so this is a real edit to what the dictionary
+    describes, not presentation.
+
+    `order` is declarative: it lists *every* id in the wanted order, and must be
+    an exact permutation of the ids already present. A list that omits, repeats,
+    or invents an id is refused with a message naming the discrepancy. That is the
+    point of the whole-list shape — a truncated or half-hallucinated list would
+    otherwise silently drop elements, and unlike a bad edit, a scrambled column
+    order is not visible in the content of the result.
+
+    Reordering by id requires ids to be unique. A dictionary can hold duplicates
+    (the validator flags them, the model tolerates them), but then an id no longer
+    identifies one element, so this refuses — as `remove_element` does. Fix the
+    duplicates first.
+
+    Args:
+        document: the current dictionary as dd-json text.
+        order: every element id, in the desired order.
+
+    Returns:
+        EditResult(document=<new dd-json text>, findings=<validation findings>).
+
+    Raises:
+        ValueError: the document is malformed, `order` is not a list of strings,
+            the document's ids are not unique, or `order` is not an exact
+            permutation of them (the message names what is missing, repeated, or
+            unknown).
+    """
+    if not isinstance(order, list) or not all(isinstance(i, str) for i in order):
+        raise ValueError("order must be a list of element ids")
+
+    doc = json.loads(load(document).to_json())
+    elements = doc.get("elements", [])
+    ids = [e.get("id") for e in elements]
+
+    # Reordering by id is only meaningful if ids identify elements.
+    duplicated = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicated:
+        raise ValueError(
+            f"cannot reorder by id: {', '.join(repr(i) for i in duplicated)} "
+            f"appears more than once; ids must be unique to reorder by id"
+        )
+
+    # Report every way the list fails to be a permutation, not just the first.
+    problems = []
+    unknown = [i for i in order if i not in ids]
+    if unknown:
+        problems.append(f"not in the document: {', '.join(map(repr, unknown))}")
+    repeated = sorted({i for i in order if order.count(i) > 1})
+    if repeated:
+        problems.append(f"listed twice: {', '.join(map(repr, repeated))}")
+    missing = [i for i in ids if i not in order]
+    if missing:
+        problems.append(f"omitted: {', '.join(map(repr, missing))}")
+    if problems:
+        raise ValueError(
+            f"order must list all {len(ids)} element id(s) exactly once — "
+            + "; ".join(problems)
+        )
+
+    by_id = {e.get("id"): e for e in elements}
+    doc["elements"] = [by_id[i] for i in order]
+
+    return _apply(doc, "cannot reorder elements")
+
+
 # ------------------------------------------------------------------ queries
 #
 # Read-only tools. They work off the dd-json dict (load(...).to_json()) rather
