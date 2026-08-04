@@ -10,6 +10,7 @@ unchanged.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from dd_api import DataDictionary
@@ -54,6 +55,30 @@ class EditResult:
     findings: list[Finding]
 
 
+def _apply(doc: dict, what: str) -> EditResult:
+    """Round-trip an edited dd-json dict through the toolkit; re-validate.
+
+    The tail shared by every editing tool. The toolkit normalises the document
+    and fills defaults, and allow_duplicate_ids lets a clashing id come back as a
+    finding rather than a hard error — the caller should see and fix it, matching
+    the app.
+
+    Some bad values the model refuses to hold at all, though: an unknown
+    datatype, or a malformed enumeration or precondition, makes from_json raise
+    ReadError (a ValueError) addressed to a line of the CSV round-trip the caller
+    never saw. Re-raise those as `<what>: <reason>` so the message names the edit
+    the caller actually made. Values the model *can* hold stay findings.
+    """
+    try:
+        dd = DataDictionary.from_json(json.dumps(doc), **ALLOW_DUPLICATE_IDS)
+    except ValueError as exc:
+        # Drop the toolkit's "Line N:" prefix: N indexes the internal CSV
+        # serialization, so quoting it at the caller is worse than saying nothing.
+        reason = re.sub(r"^Line \d+:\s*", "", str(exc))
+        raise ValueError(f"{what}: {reason}") from exc
+    return EditResult(document=dd.to_json(), findings=findings_from_csv(dd.to_csv()))
+
+
 def add_element(
     document: str,
     element: dict,
@@ -79,7 +104,11 @@ def add_element(
 
     Raises:
         ValueError: the document is malformed, `element` has no `id`, `element`
-            carries unknown keys, or `index` is out of range.
+            carries unknown keys, `index` is out of range, or `element` carries a
+            value the model cannot hold at all (an unknown datatype, a malformed
+            enumeration or precondition). Note the asymmetry: a duplicate id is a
+            *finding*, because the model can hold it; an unknown datatype is a
+            raise, because from_json rejects it outright.
     """
     if not isinstance(element, dict):
         raise ValueError("element must be an object")
@@ -104,12 +133,81 @@ def add_element(
     elements.insert(pos, dict(element))
     doc["elements"] = elements
 
-    # Round-trip: the toolkit normalises the inserted element and fills
-    # defaults. allow_duplicate_ids so a clashing id becomes a finding, not a
-    # hard error — the caller should see and fix it, matching the app.
-    dd = DataDictionary.from_json(json.dumps(doc), **ALLOW_DUPLICATE_IDS)
-    new_text = dd.to_json()
-    return EditResult(document=new_text, findings=findings_from_csv(dd.to_csv()))
+    return _apply(doc, f"cannot add element {element['id']!r}")
+
+
+def edit_element(
+    document: str,
+    element_id: str,
+    changes: dict,
+) -> EditResult:
+    """Change fields on one element and return the new document + findings.
+
+    Pure: the input document is not mutated. Only the named fields change; every
+    other field of the element, and every other element, is left alone.
+
+    Patch semantics follow the app's editing model, so an LLM edit and a human
+    edit mean the same thing: an omitted key leaves that field untouched, and an
+    explicit `null` clears it. (The app stores cleared optional scalars as null,
+    never "" or a missing key.) Clear a list-valued field with `[]`.
+
+    `id` may be changed — that is a rename. Nothing else in the document is
+    rewritten to follow it, so a rename can orphan a reference (e.g. a
+    precondition naming the old id); the returned findings are how the caller
+    sees that.
+
+    Args:
+        document: the current dictionary as dd-json text.
+        element_id: the id of the element to change. If the id is duplicated,
+            the first occurrence is edited.
+        changes: the fields to change. Unknown keys are rejected. Pass null to
+            clear an optional field; omit a key to leave it as it is.
+
+    Returns:
+        EditResult(document=<new dd-json text>, findings=<validation findings>).
+
+    Raises:
+        ValueError: the document is malformed, no element has `element_id`,
+            `changes` carries unknown keys, is not an object, is empty, would
+            blank out a mandatory field (`id`, `label`, `datatype`), or carries a
+            value the model cannot hold at all (an unknown datatype, a malformed
+            enumeration or precondition). Note the asymmetry: a duplicate id is a
+            *finding*, because the model can hold it; an unknown datatype is a
+            raise, because from_json rejects it outright.
+    """
+    if not isinstance(changes, dict):
+        raise ValueError("changes must be an object")
+    if not changes:
+        raise ValueError("changes is empty: nothing to do")
+    unknown = set(changes) - ELEMENT_FIELDS
+    if unknown:
+        raise ValueError(
+            f"unknown element field(s): {', '.join(sorted(unknown))}; "
+            f"allowed: {', '.join(sorted(ELEMENT_FIELDS))}"
+        )
+    # id/label/datatype are non-optional in dd-json, so null/"" is never a
+    # meaningful "clear" for them — reject rather than write a broken element.
+    for field in ("id", "label", "datatype"):
+        if field in changes and not changes[field]:
+            raise ValueError(f"{field} cannot be cleared: it is required")
+
+    doc = json.loads(load(document).to_json())
+    elements = doc.get("elements", [])
+
+    target = next(
+        (i for i, e in enumerate(elements) if e.get("id") == element_id), None
+    )
+    if target is None:
+        raise ValueError(f"no element with id {element_id!r}")
+
+    # Merge over a copy: unnamed fields survive untouched, null clears.
+    elements[target] = {**elements[target], **changes}
+    doc["elements"] = elements
+
+    offending = ", ".join(f"{k}={changes[k]!r}" for k in sorted(changes))
+    return _apply(
+        doc, f"cannot apply {{{offending}}} to element {element_id!r}"
+    )
 
 
 # ------------------------------------------------------------------ queries

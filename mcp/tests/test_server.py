@@ -79,9 +79,130 @@ def test_add_element_rejects_missing_id_and_unknown_fields():
         core.add_element(VALID_CSV, {"id": "y", "datatypes": "string"})
 
 
+def test_add_element_rejects_a_datatype_the_model_cannot_hold():
+    # Mirrors test_edit_element_rejects_a_datatype_the_model_cannot_hold: unlike
+    # a duplicate id, the toolkit's model refuses to hold an unknown datatype at
+    # all, so this raises rather than returning findings. The message must name
+    # the element and the bad value, not a line of the internal CSV round-trip.
+    with pytest.raises(ValueError) as exc:
+        core.add_element(
+            VALID_CSV, {"id": "x", "label": "X", "datatype": "notatype"},
+        )
+    assert "notatype" in str(exc.value) and "'x'" in str(exc.value)
+    # The toolkit's "Line N:" addresses the internal CSV, so it must not survive.
+    assert "Line" not in str(exc.value)
+
+
 def test_add_element_rejects_out_of_range_index():
     with pytest.raises(ValueError, match="out of range"):
         core.add_element(VALID_CSV, {"id": "z", "datatype": "string"}, index=99)
+
+
+def test_edit_element_changes_only_named_fields():
+    before = json.loads(core.export(SECTIONED_CSV, "json"))["elements"][0]
+    result = core.edit_element(SECTIONED_CSV, "age", {"unit": "months"})
+    after = json.loads(result.document)["elements"][0]
+
+    assert after["unit"] == "months"
+    # Every other field of the element survives untouched.
+    assert {k: v for k, v in after.items() if k != "unit"} == {
+        k: v for k, v in before.items() if k != "unit"
+    }
+    # And the other elements are left alone.
+    assert _ids(result.document) == ["age", "sex", "weight"]
+    assert not [f for f in result.findings if f.level == "ERROR"]
+
+
+def test_edit_element_null_clears_a_field():
+    # null is the app's "cleared" marker for optional scalars, so it must clear
+    # here too rather than being ignored or written as "".
+    result = core.edit_element(SECTIONED_CSV, "age", {"unit": None})
+    assert json.loads(result.document)["elements"][0]["unit"] is None
+
+
+def test_edit_element_does_not_mutate_input():
+    before = SECTIONED_CSV
+    core.edit_element(SECTIONED_CSV, "age", {"label": "Age in years"})
+    assert SECTIONED_CSV == before  # pure: caller's document untouched
+
+
+def test_edit_element_renames_via_id():
+    result = core.edit_element(SECTIONED_CSV, "age", {"id": "age_years"})
+    assert _ids(result.document) == ["age_years", "sex", "weight"]
+
+
+def test_edit_element_rename_onto_existing_id_is_a_finding_not_an_error():
+    # Same rule as add_element: a clashing id surfaces as a finding so the
+    # caller can see and fix it, matching the app.
+    result = core.edit_element(SECTIONED_CSV, "age", {"id": "sex"})
+    assert _ids(result.document) == ["sex", "sex", "weight"]
+    assert any("duplicate" in f.check.lower() or "duplicate" in f.message.lower()
+               for f in result.findings)
+
+
+def test_edit_element_rejects_a_datatype_the_model_cannot_hold():
+    # Unlike a duplicate id (which becomes a finding), the toolkit's model
+    # refuses to hold an unknown datatype at all — from_json raises. So this is
+    # a ValueError, and the message must name the field and the bad value
+    # rather than leaking a line number from the internal CSV round-trip.
+    with pytest.raises(ValueError) as exc:
+        core.edit_element(SECTIONED_CSV, "age", {"datatype": "notatype"})
+    assert "datatype" in str(exc.value) and "notatype" in str(exc.value)
+    assert "age" in str(exc.value)
+    # The toolkit's "Line N:" addresses the internal CSV, so it must not survive.
+    assert "Line" not in str(exc.value)
+
+
+def test_a_malformed_precondition_raises_from_both_editing_tools():
+    # The other value kind the model cannot hold; both tools must agree, and
+    # neither may leak the internal CSV line number.
+    with pytest.raises(ValueError, match="Malformed precondition") as add_exc:
+        core.add_element(
+            SECTIONED_CSV,
+            {"id": "p", "label": "P", "datatype": "integer",
+             "precondition": "age >>> ("},
+        )
+    with pytest.raises(ValueError, match="Malformed precondition") as edit_exc:
+        core.edit_element(SECTIONED_CSV, "age", {"precondition": "age >>> ("})
+    assert "Line" not in str(add_exc.value)
+    assert "Line" not in str(edit_exc.value)
+
+
+def test_edit_element_rejects_unknown_id_fields_and_no_op():
+    with pytest.raises(ValueError, match="no element with id"):
+        core.edit_element(SECTIONED_CSV, "nope", {"unit": "kg"})
+    with pytest.raises(ValueError, match="unknown"):
+        core.edit_element(SECTIONED_CSV, "age", {"datatypes": "string"})
+    with pytest.raises(ValueError, match="empty"):
+        core.edit_element(SECTIONED_CSV, "age", {})
+
+
+def test_edit_element_refuses_to_clear_required_fields():
+    for field in ("id", "label", "datatype"):
+        with pytest.raises(ValueError, match="required"):
+            core.edit_element(SECTIONED_CSV, "age", {field: None})
+
+
+@pytest.mark.asyncio
+async def test_edit_element_over_mcp():
+    from mcp.shared.memory import (
+        create_connected_server_and_client_session as connect,
+    )
+
+    async with connect(server.mcp._mcp_server) as client:
+        assert "edit_element" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        res = await client.call_tool("edit_element", {
+            "content": SECTIONED_CSV,
+            "element_id": "sex",
+            "changes": {"label": "Sex at birth", "unit": None},
+        })
+        payload = json.loads(res.content[0].text)
+        edited = json.loads(payload["document"])["elements"][1]
+        assert edited["label"] == "Sex at birth" and edited["unit"] is None
+        assert payload["valid"] is True
 
 
 @pytest.mark.asyncio

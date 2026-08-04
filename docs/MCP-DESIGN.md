@@ -122,6 +122,24 @@ Notes:
   immediately, matching the app's "validate on every change" behaviour.
 - A document mid-edit may be transiently invalid; like the sidecar, tools return
   findings and never hard-error on bad content ([DESIGN.md](../DESIGN.md)).
+  **One exception, found while building `edit_element`:** the toolkit's model
+  refuses to *hold* some bad values — `from_json` raises `ReadError` on an
+  unknown datatype or a malformed enumeration/precondition, and there is no
+  leniency knob for them (unlike `allow_duplicate_ids`, which is why a duplicate
+  id *is* a finding). Those raise `ValueError`, re-worded to name the element and
+  the offending change rather than a line of the internal CSV round-trip. Worth
+  revisiting if the toolkit ever gains a lenient-datatype parse.
+  Every editing tool shares this round-trip tail (`core._apply`) so the rule is
+  stated once and the tools cannot drift apart — `remove_element` and
+  `reorder_elements` should use it too.
+- **`ElementPatch` semantics** (decided for `edit_element`, applies to any later
+  patch-shaped tool): an omitted key leaves the field untouched, an explicit
+  `null` clears it, `[]` clears a list. This mirrors the app, which stores a
+  cleared optional scalar as `null` — never `""`, never a missing key
+  (`GridView.tsx` `spec.nullable`, `ElementInspector.tsx` `commitNullable`) — and
+  never distinguishes "absent" from "explicitly empty". `id`/`label`/`datatype`
+  are non-optional and cannot be cleared. Renaming via `{"id": ...}` does not
+  rewrite references elsewhere; a dangling reference shows up in the findings.
 - `GET /health`-equivalent version reporting belongs in the MCP server's
   initialize/metadata, not a tool.
 
@@ -207,14 +225,12 @@ Not solved now — flagged so phase-1/2 choices leave room.
 
 ## Open questions
 
-- Do editing tools operate on **dd-json only**, or also accept CSV/LinkML inline
-  (auto-detect like `/convert`)? Leaning dd-json-only for edits, any-format for
-  validate/query/export.
 - Is `render_html` worth exposing to an LLM, or is it a human-facing artifact
   better left to the app? (Include but low priority.)
-- Reuse the sidecar package directly (import `dd_edit_sidecar` helpers like
-  `_load`/`_detect`) or factor the shared core into a small library both consume?
-  Factoring is cleaner for adoption but is refactoring work on shipped code.
+- Should a rename (`edit_element` with `{"id": ...}`) offer to rewrite references
+  to the old id (e.g. in a `precondition`)? Today it does not, and a dangling
+  reference surfaces as a finding. A `rename_element` tool that fixes references
+  is the obvious follow-up if that turns out to bite in practice.
 
 ## Decisions log
 
@@ -226,3 +242,6 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Wire format | dd-json | canonical, versioned, JSON Schema → types (as in the app) |
 | Editing tool shape | pure `(document, op) → (document, findings)` | survives unchanged into a session model |
 | Tool arg | explicit document, no implicit "current" doc | the one assumption a session would contradict |
+| Edit input format | any format in (auto-detected), dd-json out | one rule for every tool is less to explain to an LLM than "edits are dd-json-only"; the round-trip normalises anyway |
+| Shared core | factored into `dd-edit-core` | one place for parse/validate + the feature-detected toolkit knobs; the sidecar and MCP can't drift |
+| Patch semantics | omit = leave, `null` = clear, `[]` = clear list | matches the app exactly, so LLM and human edits mean the same thing |
