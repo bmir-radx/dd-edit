@@ -194,9 +194,14 @@ dd-edit/
 ├── sidecar/
 │   ├── pyproject.toml      # depends on dd-edit-core + dd-printer/dd-redcap
 │   └── dd_edit_sidecar/    # FastAPI app
-└── mcp/                    # dd-edit-mcp: MCP server (see docs/MCP-DESIGN.md)
-    └── dd_edit_mcp/        #   depends on dd-edit-core; validate/query/author tools
+└── mcp-server/             # dd-edit-mcp: MCP server (see docs/MCP-DESIGN.md)
+    └── dd_edit_mcp/        #   depends on dd-edit-core + dd-redcap; 11 tools
 ```
+
+The MCP directory is `mcp-server/`, not `mcp/`: a directory named `mcp` shadows
+the `mcp` library for any tool that puts the repo root on `sys.path`, which broke
+`uv run` from the root. The hyphen makes shadowing impossible (it is not a legal
+module name) while the Python package stays `dd_edit_mcp`.
 
 ## Decisions log
 

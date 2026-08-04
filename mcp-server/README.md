@@ -21,18 +21,24 @@ runs the one test that really goes out.
 ## Layout
 
 ```
-mcp/
+mcp-server/
 ├── pyproject.toml          # dd-* pinned to a released tag (in step with the sidecar)
 ├── dd_edit_mcp/
-│   ├── core.py             # pure ops over the toolkit — no FastAPI, no MCP
-│   └── server.py           # FastMCP stdio server; wraps core in tools
-└── tests/test_server.py    # core directly + a protocol round-trip
+│   ├── core.py             # pure ops over the toolkit — no MCP, no FastAPI
+│   └── server.py           # MCPServer stdio server; wraps core in the 11 tools
+└── tests/test_server.py    # core directly + protocol round-trips
 ```
 
-`core.py` is deliberately transport-free: the same functions the app's sidecar
-uses, factored so an MCP server sits on top. Editing tools (phase 2+) will be
-pure `(document, op) → (document, findings)` so a session layer can wrap them
-unchanged.
+The directory is `mcp-server/`, not `mcp/`: a directory named `mcp` shadows the
+`mcp` library for any tool that puts the repo root on `sys.path` (`uv run` from
+the root failed with `No module named 'mcp.server...'`). A hyphen is not a legal
+module name, so it cannot shadow anything; the Python package is still
+`dd_edit_mcp` and the command is still `dd-edit-mcp`.
+
+`core.py` is deliberately transport-free — pure functions over the toolkit, with
+`server.py` adding only the MCP-facing docstrings and result shapes. Editing tools
+are pure `(document, op) → (document, findings)` so a phase-2 session layer can
+wrap them unchanged.
 
 ## Develop
 
@@ -50,10 +56,8 @@ helper with `Client(InMemoryTransport(server))`, so the pin is bounded at the
 major — an unbounded `>=` is what let a major bump break the imports the first
 time. Upgrading a venv built before this: re-run the `pip install -e` above.
 
-Note this package directory is itself named `mcp/`, so it shadows the `mcp`
-library for tools that put the *parent* directory on `sys.path` — `uv run` from
-the repo root fails with `No module named 'mcp.server...'`. The venv invocations
-above are unaffected; run pytest from this directory (or an absolute path).
+Run pytest from this directory, so `pyproject.toml`'s config (including the
+`live` marker exclusion) is picked up.
 
 ## Run
 
