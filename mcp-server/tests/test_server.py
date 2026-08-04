@@ -743,6 +743,98 @@ def test_export_round_trips_and_rejects_unknown():
         core.export(SECTIONED_CSV, "xml")
 
 
+def test_export_compact_is_smaller_but_lossless():
+    full = core.export(SECTIONED_CSV, "json")
+    compact = core.export(SECTIONED_CSV, "json", compact=True)
+
+    assert len(compact) < len(full)
+    # The point of the flag: it omits null/empty fields...
+    assert "null" not in compact
+    # ...but reloading it gives back exactly the full document, because those
+    # fields are precisely the ones load() fills in again.
+    assert json.loads(core.export(compact, "json")) == json.loads(full)
+
+
+def test_export_default_stays_the_full_form():
+    # The app writes the full form, so the default must not change under it.
+    default = json.loads(core.export(SECTIONED_CSV, "json"))
+    assert all("unit" in e for e in default["elements"])
+    assert any(e["unit"] is None for e in default["elements"])
+
+
+def test_compact_is_accepted_as_input_by_the_editing_tools():
+    # A caller holding a compact document must be able to edit it directly,
+    # or the size saving would come at the cost of an extra conversion.
+    compact = core.export(SECTIONED_CSV, "json", compact=True)
+
+    edited = core.edit_element(compact, "age", {"description": "Age in years"})
+    element = json.loads(edited.document)["elements"][0]
+    assert element["description"] == "Age in years"
+    assert element["unit"] == "years"  # untouched field survived the round-trip
+
+    # And clearing a field that compact omits still works.
+    cleared = core.edit_element(compact, "age", {"unit": None})
+    assert json.loads(cleared.document)["elements"][0]["unit"] is None
+
+
+def test_editing_tools_can_return_compact():
+    # Without this the flag only saves on the input leg: the caller would have to
+    # make a second export call to shrink each result.
+    full = core.edit_element(SECTIONED_CSV, "age", {"description": "X"})
+    compact = core.edit_element(
+        SECTIONED_CSV, "age", {"description": "X"}, compact=True
+    )
+
+    assert len(compact.document) < len(full.document)
+    assert "null" not in compact.document
+    # Same document, just written smaller — and identical findings.
+    assert json.loads(core.export(compact.document, "json")) == json.loads(
+        full.document
+    )
+    assert [f.as_dict() for f in compact.findings] == [
+        f.as_dict() for f in full.findings
+    ]
+
+
+def test_every_editing_tool_accepts_compact():
+    # One shared tail (_apply) means these cannot drift apart, but the wiring is
+    # per-tool, so check each one actually passes the flag through.
+    results = [
+        core.add_element(
+            SECTIONED_CSV, {"id": "new", "label": "N", "datatype": "string"},
+            compact=True,
+        ),
+        core.edit_element(SECTIONED_CSV, "age", {"unit": "months"}, compact=True),
+        core.remove_element(SECTIONED_CSV, "sex", compact=True),
+        core.reorder_elements(
+            SECTIONED_CSV, ["weight", "age", "sex"], compact=True
+        ),
+        core.import_redcap(REDCAP_CSV, compact=True),
+    ]
+    for result in results:
+        assert "null" not in result.document
+
+
+def test_compact_ignored_for_non_json_formats():
+    assert core.export(SECTIONED_CSV, "csv", compact=True) == core.export(
+        SECTIONED_CSV, "csv"
+    )
+    assert core.export(SECTIONED_CSV, "linkml", compact=True) == core.export(
+        SECTIONED_CSV, "linkml"
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_compact_over_mcp():
+    async with connect() as client:
+        res = await client.call_tool("export", {
+            "content": SECTIONED_CSV, "to": "json", "compact": True,
+        })
+        payload = json.loads(res.content[0].text)
+        assert payload["format"] == "json"
+        assert "null" not in payload["content"]
+
+
 @pytest.mark.asyncio
 async def test_query_tools_over_mcp():
     async with connect() as client:

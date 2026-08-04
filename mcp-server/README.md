@@ -89,7 +89,7 @@ auto-detected).
 | `list_elements` | query | Element summaries `{id, label, datatype, section}`, filterable by section / datatype / missing field. |
 | `get_element` | query | Full detail for one element by id; `{found, element}`. |
 | `describe_dictionary` | query | Summary: `{elementCount, sections, datatypes, valid, errorCount, warningCount}`. |
-| `export` | query | Serialise to `csv` / `linkml` / `json`; `{format, content}`. |
+| `export` | query | Serialise to `csv` / `linkml` / `json`; `{format, content}`. `compact` shrinks dd-json. |
 | `add_element` | author | Insert an element (order-aware via `index`); returns `{document, valid, findings}`. Pure — the input is not modified. |
 | `edit_element` | author | Change fields on one element by id; returns `{document, valid, findings}`. Pure. Omitted key = leave alone, `null` = clear, `{"id": ...}` = rename. |
 | `remove_element` | author | Delete one element by id and/or index; returns `{document, valid, findings}`. Pure. Refuses an ambiguous (duplicated) id rather than guessing. |
@@ -101,9 +101,24 @@ Patch semantics for `edit_element` follow the app's editing model, so an LLM edi
 and a human edit mean the same thing: the app stores a cleared optional scalar as
 `null` (never `""`, never a missing key) and an emptied list as `[]`.
 
-For both editing tools, invalid results are findings, not errors, so an edit may
+For every editing tool, invalid results are findings, not errors, so an edit may
 leave a document transiently invalid — including a duplicate id, which the model
 can hold. The exception is a value the model cannot represent at all (an unknown
 datatype, a malformed enumeration or precondition): `from_json` rejects those
 outright, so they raise `ValueError` naming the element and the offending change.
-Both tools share that tail (`core._apply`), so they cannot drift apart.
+They all share that tail (`core._apply`), so they cannot drift apart.
+
+### `compact`
+
+Every tool that returns a document takes `compact` (and so does `export`, for
+dd-json). It omits fields that are null or empty — **about half the bytes** on a
+typical dictionary, measured on a 60-element one: 28.5 KB → 14.0 KB.
+
+It is lossless and every tool accepts it as input, so it is the cheaper way to
+carry a document across several calls in a stateless conversation: the omitted
+fields are exactly the ones `load` fills back in, and editing a compact document
+gives the same result as editing the full form. Findings are unaffected — they
+come from the CSV serialisation either way.
+
+The default is the full form, deliberately: the app writes every field on every
+element, so a file destined for disk should match it.

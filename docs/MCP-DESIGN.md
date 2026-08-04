@@ -204,6 +204,21 @@ dictionaries; reason 3 is a product decision that takes us to phase 3 regardless
    ~870 lines; a large dictionary could be big enough that per-call round-trips
    burn tokens and the LLM starts truncating/paraphrasing/dropping fields on the
    return trip. That drift is the clearest "move the document server-side" signal.
+
+   **Measured, and half-mitigated.** A realistically-populated 60-element
+   dictionary is ~8.1k tokens of dd-json, so one single-field edit ships ~16k
+   tokens (document in, document out) and a ten-step session burns ~160k. Adding
+   `compact` (the toolkit's `to_json(compact=True)`, which omits null/empty
+   fields) to every document-returning tool halves that — 28.5 KB → 14.0 KB on
+   that dictionary, verified over stdio. It is lossless and accepted as input
+   everywhere, so a caller can hold the compact form between calls.
+
+   Note what this does and does not fix. It addresses the **cost** half of the
+   trigger, and it will keep paying off for one-shot stateless edits, which remain
+   the right mode for a single change. It does **not** address the **drift** half:
+   the model still re-emits the whole document each round-trip, and can still
+   paraphrase or drop a field on the way through. Only server-held state fixes
+   that, which is why compact is a mitigation rather than a reason to skip phase 2.
 2. **Multi-step edits must stay coherent.** "Add 12 fields, rename a group,
    re-validate" round-trips the whole document per step; if the model regenerates
    it slightly differently between steps, edits silently drift. A session keeps
@@ -311,4 +326,5 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Shared core | factored into `dd-edit-core` | one place for parse/validate + the feature-detected toolkit knobs; the sidecar and MCP can't drift |
 | Patch semantics | omit = leave, `null` = clear, `[]` = clear list | matches the app exactly, so LLM and human edits mean the same thing |
 | Ambiguous id on delete | refuse, report positions, offer `index` | a wrong delete is invisible in the result and there is no undo; a wrong edit is neither |
+| `compact` output | opt-in on every document-returning tool; full form is the default | halves the bytes a stateless caller carries, losslessly; the default stays full because the app writes every field and a file for disk should match |
 | Reorder shape | full id list, must be an exact permutation | declarative and order-of-operations-free; the permutation check is what stops a truncated list from silently dropping elements. The app's `moveElement(from, to)` is a drag-and-drop affordance, not the right shape for a caller that cannot see the grid or track shifting indices across calls |
