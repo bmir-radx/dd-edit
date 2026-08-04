@@ -25,6 +25,11 @@ declare global {
       confirmDiscard: (name: string) => Promise<'save' | 'discard' | 'cancel'>
       /** Subscribe to application-menu actions; returns unsubscribe. */
       onMenu: (cb: (action: string, payload?: string) => void) => () => void
+      /**
+       * The open file changed on disk and the user agreed to reload it. Main
+       * has already prompted and read the file; returns unsubscribe.
+       */
+      onFileReloaded: (cb: (path: string, content: string) => void) => () => void
     }
   }
 }

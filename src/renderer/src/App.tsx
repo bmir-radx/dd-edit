@@ -293,6 +293,19 @@ export function App() {
     return window.ddEdit.onMenu((action, payload) => handlers.current[action]?.(payload))
   }, [])
 
+  // The open file changed on disk and the user chose to reload. Main has already
+  // asked (and warned about losing unsaved edits), so this just loads it — the
+  // same path as opening the file, so a reload and an open behave identically.
+  // Kept in a ref for the same reason the menu handlers are: the subscription
+  // outlives the closure.
+  const reloadHandler = useRef(openParsedOrImport)
+  reloadHandler.current = openParsedOrImport
+  useEffect(() => {
+    return window.ddEdit.onFileReloaded((path, content) => {
+      void reloadHandler.current({ path, content })
+    })
+  }, [])
+
   // Cmd/Ctrl+F opens the grid's search overlay.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

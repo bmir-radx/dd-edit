@@ -9,6 +9,14 @@
  *               | fieldId "contains" literal
  *   literal    := "quoted string" | bare numeral
  *
+ * `contains` is SET MEMBERSHIP, not substring: it asks whether a multi-valued
+ * field (Cardinality multiple) holds a value among its values. The grammar has
+ * no substring operator, so "this text field mentions X" is not expressible —
+ * and `pattern` is not a substitute, since it constrains a field's own values
+ * rather than another field's. The word reads as substring in English, which has
+ * misled readers of this file before; analyze() calls that out explicitly when
+ * `contains` is used on single-valued text.
+ *
  * Three pure pieces, shared by the inspector's precondition field:
  *   - parse():   tokenizer + recursive-descent parser → AST or a positioned error
  *   - analyze(): semantic warnings against the open document (unknown field,
@@ -236,6 +244,15 @@ export function isOrderedDatatype(datatype: string): boolean {
   return /(int|float|decimal|double|number|date|time|year)/i.test(datatype)
 }
 
+/**
+ * Free-text datatypes — where reaching for `contains` most likely means
+ * substring matching rather than the grammar's set-membership test. A blank
+ * datatype counts: an element mid-authoring is text until told otherwise.
+ */
+export function isTextDatatype(datatype: string): boolean {
+  return datatype === '' || /(string|text|token|anyURI|normalizedString)/i.test(datatype)
+}
+
 /** Shape check for literals compared against a field of this datatype. */
 function datatypeChecker(
   datatype: string,
@@ -282,7 +299,18 @@ export function analyze(ast: ExprNode, elements: readonly DataElement[]): Warnin
       warn(`“${node.op}” needs an ordered datatype — ${node.field} is ${el.datatype || 'text'}`)
     }
     if (node.op === 'contains' && el.cardinality !== 'multiple') {
-      warn(`“contains” needs Cardinality multiple — ${node.field} is single`)
+      // "contains" is set membership over a multi-valued field's codes. Reached
+      // for on a single-valued text field it almost always means substring
+      // matching, which the grammar cannot express at all — so say that, rather
+      // than only naming the cardinality rule the user tripped over.
+      warn(
+        isTextDatatype(el.datatype) ?
+          `“contains” asks whether a multi-valued field includes a value — it is ` +
+            `not substring matching, which preconditions cannot express. ` +
+            `${node.field} is single-valued ${el.datatype || 'text'}; use “=” for an ` +
+            `exact value, or Cardinality multiple if it really holds a list.`
+        : `“contains” needs Cardinality multiple — ${node.field} is single`,
+      )
     }
     const enumeration = (el.enumeration ?? []) as EnumItem[]
     // The `<> ""` blank test is always fine; skip its value everywhere.
