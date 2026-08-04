@@ -276,6 +276,117 @@ def test_remove_last_element_yields_a_valid_empty_dictionary():
     assert core.describe_dictionary(doc)["elementCount"] == 0
 
 
+# --------------------------------------------------- documented tool surface
+#
+# The tool docstrings are the product surface: an LLM uses them without reading
+# the source. These tests pin the concrete claims those docstrings make, so a
+# toolkit change cannot quietly turn the documentation into a lie.
+
+GRAMMAR_FIXTURE_CSV = (
+    "Id,Label,Datatype,Cardinality,Enumeration\n"
+    "age,Age,integer,single,\n"
+    'sex,Sex,integer,single,"""1""=[M] | ""2""=[F]"\n'
+    'race,Race,integer,multiple,"""1""=[A] | ""2""=[B] | ""3""=[C]"\n'
+    "symptoms,Symptoms,string,multiple,\n"
+    "consent,Consent,string,single,\n"
+    "target,Target,string,single,\n"
+)
+
+
+@pytest.mark.parametrize("expression", [
+    'age >= 18',
+    'sex = "1"',
+    'age >= 18 and sex <> "2"',
+    'race in {"1", "2", "3"}',
+    'symptoms contains "fever"',
+    'consent <> ""',
+])
+def test_documented_precondition_examples_are_accepted(expression):
+    # Every example in edit_element's "Precondition grammar" section must parse
+    # and be semantically clean against the fixture it was written for.
+    result = core.edit_element(
+        GRAMMAR_FIXTURE_CSV, "target", {"precondition": expression}
+    )
+    assert not [f for f in result.findings if f.level == "ERROR"]
+
+
+def test_documented_enumeration_shape_round_trips():
+    # edit_element documents [{"value": ..., "label": ..., "iri": ...}].
+    result = core.edit_element(GRAMMAR_FIXTURE_CSV, "sex", {
+        "enumeration": [
+            {"value": "1", "label": "Male"},
+            {"value": "9", "label": "Other", "iri": "http://example.org/9"},
+        ],
+    })
+    enum = json.loads(result.document)["elements"][1]["enumeration"]
+    assert enum == [
+        {"value": "1", "label": "Male", "iri": None},
+        {"value": "9", "label": "Other", "iri": "http://example.org/9"},
+    ]
+
+
+def test_enumeration_silently_drops_valueless_items_as_documented():
+    # Documented as a trap rather than fixed here: the toolkit drops these
+    # without an error, so the docstring warns "always send objects with a
+    # value". If the toolkit ever starts rejecting them, this test fails and the
+    # warning should be rewritten.
+    label_only = core.edit_element(
+        GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": [{"label": "Male"}]}
+    )
+    assert json.loads(label_only.document)["elements"][1]["enumeration"] == []
+
+    bare_strings = core.edit_element(
+        GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": ["1", "2"]}
+    )
+    assert json.loads(bare_strings.document)["elements"][1]["enumeration"] == []
+
+
+def test_terms_is_a_list_of_strings_as_documented():
+    ok = core.edit_element(
+        GRAMMAR_FIXTURE_CSV, "sex", {"terms": ["http://purl.org/x_1"]}
+    )
+    assert json.loads(ok.document)["elements"][1]["terms"] == [
+        "http://purl.org/x_1"
+    ]
+
+
+@pytest.mark.parametrize("expression,check", [
+    ("age >>> (", "malformed-precondition"),
+    ("nope > 1", "unknown-precondition-field"),
+    ("consent > 5", "invalid-precondition-comparison"),
+    ('age contains "x"', "invalid-precondition-contains"),
+])
+def test_documented_precondition_checks_exist(expression, check):
+    # validate_dictionary names these checks; they must be the real strings.
+    # A malformed expression cannot be written through edit_element (the model
+    # refuses to hold it — the asymmetry the docstring calls out), so put it in
+    # the CSV directly, where the validator reads the text before the model sees it.
+    doc = GRAMMAR_FIXTURE_CSV.replace(
+        "Id,Label,Datatype,Cardinality,Enumeration\n",
+        "Id,Label,Datatype,Cardinality,Enumeration,Precondition\n",
+    ).replace(
+        "target,Target,string,single,\n",
+        # Inner quotes must be doubled to survive the CSV field they sit in.
+        'target,Target,string,single,,"{}"\n'.format(
+            expression.replace('"', '""')
+        ),
+    )
+    assert any(f.check == check for f in core.validate_document(doc)), (
+        f"{check!r} not raised for {expression!r}"
+    )
+
+
+def test_and_binds_tighter_than_or_as_documented():
+    from dd_core.grammar import parse_precondition
+
+    # "a or b and c" groups as a OR (b AND c) — so the top node is the Or.
+    loose = parse_precondition("age > 1 or age > 2 and age > 3")
+    assert type(loose).__name__ == "Or"
+    # Parenthesising overrides it, which is what the "(" expression ")" form is for.
+    grouped = parse_precondition("(age > 1 or age > 2) and age > 3")
+    assert type(grouped).__name__ == "And"
+
+
 def test_reorder_elements_permutes_and_preserves_content():
     before = json.loads(core.export(SECTIONED_CSV, "json"))["elements"]
     result = core.reorder_elements(SECTIONED_CSV, ["weight", "age", "sex"])

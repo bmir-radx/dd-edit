@@ -233,6 +233,19 @@ Not solved now — flagged so phase-1/2 choices leave room.
   server; optionally a `uvx` one-liner for zero-install trial.
 - Tool descriptions and parameter schemas are the actual product surface for
   adoption — an LLM must use them without reading source. Budget real effort here.
+  Concretely, they carry: the precondition grammar (in `edit_element` — otherwise
+  a caller guesses the syntax and gets `malformed-precondition` back), the shape
+  of the non-string fields (`enumeration`/`missing_value_codes` are
+  `[{value, label, iri}]`; `terms`/`aliases`/`examples` are plain string lists),
+  and the check names an edit tends to trip (in `validate_dictionary`). Three
+  toolkit behaviours are documented as traps because they lose data *silently*
+  rather than erroring: an enumeration item with no `value` is dropped, a list of
+  bare strings is dropped whole, and `terms` given objects is stringified and
+  split on whitespace. `tests/test_server.py` pins each documented claim, so the
+  docs cannot rot into lies without a test failing.
+- All nine descriptions together are ~13 KB (~3.2k tokens), shipped on every
+  request. Worth tracking as tools are added; `edit_element` alone is a third of
+  it, which is the right place to spend it.
 - **Bound the MCP SDK dependency at the major** (`mcp>=2,<3`). The original
   `mcp>=1.2` was unbounded, so SDK 2.0 — which renamed `fastmcp.FastMCP` to
   `mcpserver.MCPServer` and dropped `shared.memory`'s test helper — was resolved
