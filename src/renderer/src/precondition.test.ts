@@ -181,6 +181,18 @@ describe('analyze', () => {
     expect(analyzed('symptoms contains "1"')).toEqual([])
   })
 
+  it('explains that contains is not substring matching, on a text field', () => {
+    // Reaching for `contains` on single-valued text almost always means "has X
+    // as a substring", which the grammar cannot express — the warning has to say
+    // so, not just name the cardinality rule.
+    const warning = analyzed('name contains "fever"').join()
+    expect(warning).toContain('not substring matching')
+    expect(warning).toContain('cannot express')
+    // A numeric field gets the plain cardinality message: nobody means substring
+    // matching on an integer.
+    expect(analyzed('sex contains "1"').join()).not.toContain('substring')
+  })
+
   it('warns about values outside an enumeration', () => {
     expect(analyzed('sex = "5"').join()).toContain("not in sex's enumeration")
     expect(analyzed('sex in {"1", "9"}').join()).toContain('9')
