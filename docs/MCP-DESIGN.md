@@ -68,13 +68,35 @@ document between calls.
 Deliverable: a usable validate/query/author server, and the tested primitives
 the later phases build on. Proves the toolkit imports and runs outside FastAPI.
 
-### Phase 2 — sessions
+### Phase 2 — sessions — **built**
 
-Add `open_dictionary` / `close_dictionary`. Editing tools optionally take a
-session handle instead of an inline document; the server holds one authoritative
-copy and mutates it in place. Same core logic — a lifecycle layer on top.
+`open_dictionary` / `close_dictionary` / `list_sessions`, plus an optional
+`session_id` on every document-taking tool. The server holds one authoritative
+copy in `sessions.py` and mutates it in place. Same core logic — a lifecycle layer
+on top, wrapping the pure functions rather than reimplementing them.
 
-This is what fixes the stateless pain points (see *When to go stateful*).
+Measured over stdio, five edits on a 60-element dictionary: **360 KB stateless vs
+37 KB in a session (~90k → ~9k tokens), with a byte-identical final document.**
+
+Two things earn most of that, and only one was obvious:
+- A session reply carries a summary, not the document.
+- A session reply carries a **findings digest**, not every finding. This was the
+  surprise: a 60-element dictionary has 60 `missing-unit` INFO findings, and
+  returning them all made the reply 16.7 KB against a 105-byte summary — 42% of
+  stateless rather than 10%. Errors come back in full (capped, with
+  `errorsOmitted`); everything else is counts by check, with the full list a
+  `validate_dictionary(session_id=…)` away. The general lesson: in a session
+  design, *anything* proportional to document size has to be paged or summarised,
+  not just the document.
+
+No expiry, in-memory, process-scoped: a document a client is editing must not
+evaporate mid-conversation, and for a stdio server the process *is* the
+conversation. An idle timeout only makes sense for a long-lived shared server,
+which this is not yet.
+
+The stateless path is unchanged and stays the right mode for a one-shot edit. That
+was also the safety property: all 74 phase-1 tests passed untouched, so the
+refactor provably did not change what an edit means.
 
 ### Phase 3 — live app integration
 
@@ -326,5 +348,9 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Shared core | factored into `dd-edit-core` | one place for parse/validate + the feature-detected toolkit knobs; the sidecar and MCP can't drift |
 | Patch semantics | omit = leave, `null` = clear, `[]` = clear list | matches the app exactly, so LLM and human edits mean the same thing |
 | Ambiguous id on delete | refuse, report positions, offer `index` | a wrong delete is invisible in the result and there is no undo; a wrong edit is neither |
+| Session state | `sessions.py` in the MCP, wrapping the pure core functions | keeps `core.py` transport-free and shareable (the reason `dd-edit-core` was extracted); phase 3 swaps what a session holds without touching the tools |
+| Session API | optional `session_id` alongside `content`, not separate `session_*` tools | doubling the tool count would double the description budget an LLM reads, for near-duplicates; sharing one path means an edit cannot mean two things |
+| Absent-argument sentinel | `content: str = ""`, **not** `str \| None` | the SDK pre-parses a string argument into JSON unless the annotation is exactly `str` (`func_metadata.pre_parse_json`), so `str \| None` silently turned a dd-json document into a dict — caught only by feeding a returned document back in |
+| Session reply findings | ERRORs in full (capped), the rest as counts by check | findings scale with the document, which is precisely what a session exists to avoid; returning all of them cost 16.7 KB against a 105-byte summary |
 | `compact` output | opt-in on every document-returning tool; full form is the default | halves the bytes a stateless caller carries, losslessly; the default stays full because the app writes every field and a file for disk should match |
 | Reorder shape | full id list, must be an exact permutation | declarative and order-of-operations-free; the permutation check is what stops a truncated list from silently dropping elements. The app's `moveElement(from, to)` is a drag-and-drop affordance, not the right shape for a caller that cannot see the grid or track shifting indices across calls |

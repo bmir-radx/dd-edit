@@ -276,6 +276,286 @@ def test_remove_last_element_yields_a_valid_empty_dictionary():
     assert core.describe_dictionary(doc)["elementCount"] == 0
 
 
+# ----------------------------------------------------------------- sessions
+#
+# Phase 2. The store is exercised directly, then the dual-mode tools over the
+# protocol. The point of the design is that the 70-odd stateless tests above keep
+# passing untouched — session mode is an addition, not a replacement.
+
+
+@pytest.fixture
+def store():
+    from dd_edit_mcp.sessions import SessionStore
+
+    return SessionStore()
+
+
+@pytest.fixture
+def clean_sessions():
+    """Isolate the server's module-level store between tests."""
+    from dd_edit_mcp.sessions import SessionStore
+
+    original = server.sessions
+    server.sessions = SessionStore()
+    yield server.sessions
+    server.sessions = original
+
+
+def test_store_holds_a_document_and_counts_revisions(store):
+    session = store.open(core.export(SECTIONED_CSV, "json"))
+    assert session.revision == 0
+    assert session.summary()["elementCount"] == 3
+
+    store.apply(session.id, lambda doc: core.edit_element(
+        doc, "age", {"unit": "months"}))
+    store.apply(session.id, lambda doc: core.add_element(
+        doc, {"id": "new", "label": "N", "datatype": "string"}))
+
+    held = store.get(session.id)
+    assert held.revision == 2
+    assert _ids(held.document) == ["age", "sex", "weight", "new"]
+    assert json.loads(held.document)["elements"][0]["unit"] == "months"
+
+
+def test_store_leaves_the_document_untouched_when_an_edit_fails(store):
+    session = store.open(core.export(SECTIONED_CSV, "json"))
+    before, revision = session.document, session.revision
+
+    # An unknown datatype is the kind the model cannot hold, so it raises.
+    with pytest.raises(ValueError, match="notatype"):
+        store.apply(session.id, lambda doc: core.edit_element(
+            doc, "age", {"datatype": "notatype"}))
+
+    held = store.get(session.id)
+    assert held.document == before  # no partial application
+    assert held.revision == revision  # and the revision did not move
+
+
+def test_store_explains_an_unknown_session(store):
+    store.open(core.export(SECTIONED_CSV, "json"))  # so one is open
+    with pytest.raises(ValueError, match="no open session 'nope'") as exc:
+        store.get("nope")
+    # The message names what *is* open, since a stale handle is the likely cause.
+    assert "s1" in str(exc.value)
+
+
+def test_store_close_returns_the_document_and_frees_the_id(store):
+    session = store.open(core.export(SECTIONED_CSV, "json"))
+    closed = store.close(session.id)
+    assert _ids(closed.document) == ["age", "sex", "weight"]
+
+    with pytest.raises(ValueError, match="no open session"):
+        store.get(session.id)
+    assert store.list() == []
+
+
+def test_store_keeps_sessions_independent(store):
+    a = store.open(core.export(SECTIONED_CSV, "json"))
+    b = store.open(core.export(SECTIONED_CSV, "json"))
+
+    store.apply(a.id, lambda doc: core.remove_element(doc, "age"))
+
+    assert _ids(store.get(a.id).document) == ["sex", "weight"]
+    assert _ids(store.get(b.id).document) == ["age", "sex", "weight"]
+    assert len(store.list()) == 2
+
+
+@pytest.mark.asyncio
+async def test_session_lifecycle_over_mcp(clean_sessions):
+    async with connect() as client:
+        names = {t.name for t in (await client.list_tools()).tools}
+        assert {"open_dictionary", "close_dictionary", "list_sessions"} <= names
+
+        opened = json.loads((await client.call_tool(
+            "open_dictionary", {"content": SECTIONED_CSV})).content[0].text)
+        session_id = opened["sessionId"]
+        assert opened["revision"] == 0 and opened["elementCount"] == 3
+
+        # An edit in session mode returns a summary, not the document.
+        edited = json.loads((await client.call_tool("edit_element", {
+            "session_id": session_id,
+            "element_id": "age",
+            "changes": {"unit": "months"},
+        })).content[0].text)
+        assert "document" not in edited
+        assert edited["revision"] == 1 and edited["valid"] is True
+
+        # Queries read the held document.
+        listed = json.loads((await client.call_tool(
+            "list_elements", {"session_id": session_id})).content[0].text)
+        assert listed["count"] == 3
+
+        got = json.loads((await client.call_tool("get_element", {
+            "session_id": session_id, "element_id": "age"})).content[0].text)
+        assert got["element"]["unit"] == "months"
+
+        # And closing hands the document back.
+        closed = json.loads((await client.call_tool(
+            "close_dictionary", {"session_id": session_id})).content[0].text)
+        assert json.loads(closed["document"])["elements"][0]["unit"] == "months"
+        assert closed["revision"] == 1
+
+        remaining = json.loads(
+            (await client.call_tool("list_sessions", {})).content[0].text)
+        assert remaining["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_session_and_stateless_modes_agree(clean_sessions):
+    """The same edit must mean the same thing in both modes."""
+    async with connect() as client:
+        stateless = json.loads((await client.call_tool("edit_element", {
+            "content": SECTIONED_CSV,
+            "element_id": "age",
+            "changes": {"unit": "months", "description": "Age"},
+        })).content[0].text)
+
+        opened = json.loads((await client.call_tool(
+            "open_dictionary", {"content": SECTIONED_CSV})).content[0].text)
+        await client.call_tool("edit_element", {
+            "session_id": opened["sessionId"],
+            "element_id": "age",
+            "changes": {"unit": "months", "description": "Age"},
+        })
+        closed = json.loads((await client.call_tool(
+            "close_dictionary", {"session_id": opened["sessionId"]})
+        ).content[0].text)
+
+        assert json.loads(closed["document"]) == json.loads(
+            stateless["document"])
+
+
+@pytest.mark.asyncio
+async def test_tools_reject_both_or_neither_document(clean_sessions):
+    async with connect() as client:
+        for arguments in (
+            {"element_id": "age", "changes": {"unit": "kg"}},  # neither
+            {  # both
+                "element_id": "age", "changes": {"unit": "kg"},
+                "content": SECTIONED_CSV, "session_id": "s1",
+            },
+        ):
+            res = await client.call_tool("edit_element", arguments)
+            assert res.is_error is True
+            assert "not both and not neither" in res.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_session_replies_do_not_scale_with_the_document(clean_sessions):
+    """The property the whole phase exists for.
+
+    A session reply must stay small however big the dictionary is. Returning every
+    finding broke that — a 60-element dictionary carries 60 INFO findings, which
+    dwarfed the ~100-byte summary — so errors come back in full and the rest as
+    counts by check.
+    """
+    rows = ["Id,Label,Datatype,Cardinality,Unit,Section,Description"]
+    for i in range(60):
+        rows.append(f"f{i:02d},Field {i},integer,single,years,Demo,A measure")
+    big = "\n".join(rows) + "\n"
+
+    async with connect() as client:
+        opened = json.loads((await client.call_tool(
+            "open_dictionary", {"content": big})).content[0].text)
+        reply = await client.call_tool("edit_element", {
+            "session_id": opened["sessionId"],
+            "element_id": "f00",
+            "changes": {"unit": "months"},
+        })
+        text = reply.content[0].text
+        payload = json.loads(text)
+
+        # A summary, not a document, and not 60 findings either.
+        assert "document" not in payload
+        assert len(text) < 1000, f"session reply grew to {len(text)} chars"
+        assert payload["errors"] == []  # nothing to act on
+        assert payload["otherFindings"]  # but the INFO checks are still counted
+        assert payload["elementCount"] == 60
+
+
+@pytest.mark.asyncio
+async def test_session_errors_come_back_in_full(clean_sessions):
+    async with connect() as client:
+        opened = json.loads((await client.call_tool(
+            "open_dictionary", {"content": SECTIONED_CSV})).content[0].text)
+        # A duplicate id is a finding the caller must act on.
+        payload = json.loads((await client.call_tool("edit_element", {
+            "session_id": opened["sessionId"],
+            "element_id": "age",
+            "changes": {"id": "sex"},
+        })).content[0].text)
+
+        assert payload["valid"] is False
+        assert any(e["check"] == "duplicate-id" for e in payload["errors"])
+
+        # And the full list is still reachable through the session.
+        full = json.loads((await client.call_tool(
+            "validate_dictionary", {"session_id": opened["sessionId"]})
+        ).content[0].text)
+        assert any(f["check"] == "duplicate-id" for f in full["findings"])
+
+
+@pytest.mark.asyncio
+async def test_a_returned_document_can_be_fed_straight_back(clean_sessions):
+    """The stateless workflow: edit, then edit the result.
+
+    Regression test. When `content` was first made optional it was annotated
+    `str | None`, and the SDK pre-parses a string argument into JSON whenever the
+    annotation is not exactly `str` (func_metadata.pre_parse_json) — so a dd-json
+    document arrived as a dict and was rejected. The annotation must stay plain
+    `str`, with "" meaning absent, or chaining silently breaks.
+    """
+    async with connect() as client:
+        first = await client.call_tool("edit_element", {
+            "content": SECTIONED_CSV,
+            "element_id": "age",
+            "changes": {"unit": "months"},
+        })
+        document = json.loads(first.content[0].text)["document"]
+
+        second = await client.call_tool("edit_element", {
+            "content": document,
+            "element_id": "sex",
+            "changes": {"unit": "1"},
+        })
+        assert second.is_error is False
+        elements = json.loads(json.loads(second.content[0].text)["document"])
+        assert elements["elements"][0]["unit"] == "months"  # first edit survived
+        assert elements["elements"][1]["unit"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_content_parameter_is_declared_as_a_plain_string(clean_sessions):
+    # The guard for the bug above: `anyOf: [string, null]` is what triggers the
+    # SDK's pre-parsing, so assert the schema the SDK actually generates.
+    async with connect() as client:
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("edit_element", "add_element", "remove_element",
+                     "reorder_elements", "list_elements", "export"):
+            schema = tools[name].input_schema["properties"]["content"]
+            assert schema.get("type") == "string", (
+                f"{name}.content must be a plain string, got {schema}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_import_redcap_can_open_a_session(clean_sessions):
+    async with connect() as client:
+        opened = json.loads((await client.call_tool("import_redcap", {
+            "content": REDCAP_CSV, "open_session": True,
+        })).content[0].text)
+
+        # A converted dictionary usually needs follow-up edits, so it can go
+        # straight into a session instead of being shipped back first.
+        assert "document" not in opened
+        assert opened["elementCount"] == 3 and opened["revision"] == 0
+
+        closed = json.loads((await client.call_tool(
+            "close_dictionary", {"session_id": opened["sessionId"]})
+        ).content[0].text)
+        assert _ids(closed["document"]) == ["age", "sex", "weight"]
+
+
 # -------------------------------------------------------------- term lookup
 #
 # lookup_terms is the only tool that leaves the process. These tests stub the

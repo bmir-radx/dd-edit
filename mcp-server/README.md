@@ -3,16 +3,19 @@
 An [MCP](https://modelcontextprotocol.io) server exposing RADx data-dictionary
 tools to an LLM. Design: [../docs/MCP-DESIGN.md](../docs/MCP-DESIGN.md).
 
-**Status: phase-1 tool inventory complete** except `render_html`, which the design
-doc rates low priority (a human-facing artifact, arguably the app's job). Eleven
-tools covering validate, query, and author. All stateless: every tool takes the
-document it works on, so nothing assumes a single global document — the one
-assumption a phase-2 session model would contradict.
+**Status: phase 2 (sessions) landed.** Fourteen tools covering validate, query,
+author, and the session lifecycle. Phase 1's inventory is complete except
+`render_html`, which the design doc rates low priority (a human-facing artifact,
+arguably the app's job).
+
+Every document-taking tool works two ways: pass `content` for a one-shot stateless
+call, or `session_id` to work against a document the server is holding. Neither is
+privileged — see *Sessions* below for which to reach for.
 
 The element-editing set — `add_element`, `edit_element`, `remove_element`,
 `reorder_elements` — is uniform: pure `(document, op) → (document, findings)`,
-sharing one round-trip tail (`core._apply`), ready for a session layer to wrap
-unchanged (phases 2–3 in the design doc).
+sharing one round-trip tail (`core._apply`). Phase 3 (the app's live document)
+replaces what a session holds without changing the tools above it.
 
 `lookup_terms` is the exception to "pure and offline": it queries OLS4 over the
 network. The suite stubs it, so `pytest` stays deterministic; `pytest -m live`
@@ -25,7 +28,8 @@ mcp-server/
 ├── pyproject.toml          # dd-* pinned to a released tag (in step with the sidecar)
 ├── dd_edit_mcp/
 │   ├── core.py             # pure ops over the toolkit — no MCP, no FastAPI
-│   └── server.py           # MCPServer stdio server; wraps core in the 11 tools
+│   ├── sessions.py         # phase 2: documents the server holds, by handle
+│   └── server.py           # MCPServer stdio server; wraps core in the 14 tools
 └── tests/test_server.py    # core directly + protocol round-trips
 ```
 
@@ -36,9 +40,10 @@ module name, so it cannot shadow anything; the Python package is still
 `dd_edit_mcp` and the command is still `dd-edit-mcp`.
 
 `core.py` is deliberately transport-free — pure functions over the toolkit, with
-`server.py` adding only the MCP-facing docstrings and result shapes. Editing tools
-are pure `(document, op) → (document, findings)` so a phase-2 session layer can
-wrap them unchanged.
+`server.py` adding only the MCP-facing docstrings and result shapes. `sessions.py`
+wraps those same pure functions rather than reimplementing them, so an edit means
+exactly one thing in both modes; that is what let phase 2 land with every phase-1
+test passing untouched.
 
 ## Develop
 
@@ -85,6 +90,9 @@ auto-detected).
 
 | Tool | Group | Purpose |
 | --- | --- | --- |
+| `open_dictionary` | session | Hold a document server-side; returns `{sessionId, revision, …}`. |
+| `close_dictionary` | session | End a session and get the final document back. |
+| `list_sessions` | session | What the server is currently holding. |
 | `validate_dictionary` | validate | Findings for a dictionary; returns `{detected, valid, findings}`. |
 | `list_elements` | query | Element summaries `{id, label, datatype, section}`, filterable by section / datatype / missing field. |
 | `get_element` | query | Full detail for one element by id; `{found, element}`. |
@@ -107,6 +115,34 @@ can hold. The exception is a value the model cannot represent at all (an unknown
 datatype, a malformed enumeration or precondition): `from_json` rejects those
 outright, so they raise `ValueError` naming the element and the offending change.
 They all share that tail (`core._apply`), so they cannot drift apart.
+
+### Sessions (phase 2)
+
+`open_dictionary` hands a document to the server to hold and returns a
+`sessionId`; pass that instead of `content` to any editing or query tool, and
+`close_dictionary` gives the final document back.
+
+The point is traffic. Measured over stdio, five edits on a 60-element dictionary:
+
+| | bytes | ~tokens |
+| --- | --- | --- |
+| stateless (`content` each call) | 360 KB | 90k |
+| session (`session_id`) | 37 KB | 9k |
+
+Both produce a byte-identical final document — the tests assert it. Two things
+make the saving real: a session reply carries a summary rather than the document,
+and it carries a **findings digest** rather than every finding. That second part
+matters more than it sounds: a 60-element dictionary has 60 `missing-unit` INFO
+findings, which dwarfed the ~100-byte summary they were attached to. So `errors`
+comes back in full (capped at 10, with `errorsOmitted`) and everything else as
+counts by check. `validate_dictionary(session_id=...)` still gives the full list.
+
+Sessions are in-memory and process-scoped, with no expiry: a document a client is
+editing must not evaporate mid-conversation, and for a stdio server the process
+*is* the conversation. `close_dictionary` is how a session ends.
+
+Stateless mode is unchanged and remains the right choice for a single edit —
+there is nothing to open or close, and one call costs no more either way.
 
 ### `compact`
 

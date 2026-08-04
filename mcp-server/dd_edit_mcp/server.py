@@ -19,6 +19,7 @@ from importlib.metadata import PackageNotFoundError, version
 from mcp.server.mcpserver import MCPServer
 
 from dd_edit_mcp import core
+from dd_edit_mcp.sessions import SessionStore
 
 try:
     _VERSION = version("dd-edit-mcp")
@@ -27,9 +28,189 @@ except PackageNotFoundError:  # running from a source tree, not installed
 
 mcp = MCPServer("dd-edit", version=_VERSION)
 
+# Phase-2 session state. One store per server process; a stdio server serves one
+# client, so this is that client's set of open documents.
+sessions = SessionStore()
+
+
+def _document(content: str, session_id: str) -> str:
+    """Resolve the two ways a tool can be handed a document.
+
+    Every document-taking tool accepts either an inline `content` or a
+    `session_id`. Requiring exactly one keeps the ambiguous cases — both, or
+    neither — from being silently resolved in a way the caller did not intend.
+
+    Both are annotated plain `str` with "" meaning absent, deliberately: the SDK
+    pre-parses a string argument into JSON whenever the annotation is not exactly
+    `str` (func_metadata.pre_parse_json), so `str | None` would turn a dd-json
+    document into a dict before the tool ever saw it.
+    """
+    if bool(content) == bool(session_id):
+        raise ValueError(
+            "pass either content (an inline document) or session_id "
+            "(an open session), not both and not neither"
+        )
+    if session_id:
+        return sessions.get(session_id).document
+    return content
+
+
+def _findings_digest(findings: list, limit: int = 10) -> dict:
+    """Findings for a session reply: the errors, and counts for the rest.
+
+    A session exists so a reply does not scale with the document, and findings do
+    — a 60-element dictionary can easily carry 60 INFO findings, which dwarfed the
+    100-byte summary they were attached to. So return the ERRORs (what a caller
+    must act on), capped, plus counts by check for everything else. The full list
+    is always a `validate_dictionary(session_id=...)` call away.
+    """
+    errors = [f for f in findings if f.level == "ERROR"]
+    by_check: dict[str, int] = {}
+    for finding in findings:
+        if finding.level != "ERROR":
+            by_check[finding.check] = by_check.get(finding.check, 0) + 1
+    digest = {
+        "errors": [f.as_dict() for f in errors[:limit]],
+        "otherFindings": by_check,
+    }
+    if len(errors) > limit:
+        digest["errorsOmitted"] = len(errors) - limit
+    return digest
+
+
+def _edit(
+    content: str,
+    session_id: str,
+    operation,
+    *,
+    extra: dict | None = None,
+) -> dict:
+    """Run an editing operation in whichever mode the caller asked for.
+
+    `operation` is a core editing function with everything but the document bound.
+    Session mode keeps the result server-side and returns a summary; stateless
+    mode returns the new document, as it always has. The two share this one path
+    so an edit cannot mean different things in the two modes.
+    """
+    if bool(content) == bool(session_id):
+        raise ValueError(
+            "pass either content (an inline document) or session_id "
+            "(an open session), not both and not neither"
+        )
+
+    if session_id:
+        # Session mode: the held document is the input, and the result stays
+        # server-side. compact is irrelevant — no document is returned.
+        session = sessions.apply(session_id, operation)
+        return {
+            **session.summary(),
+            **_findings_digest(session.findings),
+            **(extra or {}),
+        }
+
+    result = operation(content)
+    return {
+        "document": result.document,
+        "valid": not any(f.level == "ERROR" for f in result.findings),
+        "findings": [f.as_dict() for f in result.findings],
+        **(extra or {}),
+    }
+
 
 @mcp.tool()
-def validate_dictionary(content: str) -> dict:
+def open_dictionary(content: str) -> dict:
+    """Hand a dictionary to the server to hold, and get a session id back.
+
+    Use this when you are about to make **several** edits. The server keeps the
+    authoritative copy, so each edit sends only what changed and returns only a
+    summary — instead of shipping the whole document in and out every time. On a
+    60-element dictionary that is the difference between ~16k tokens per edit and
+    a few hundred.
+
+    It also removes a failure mode: when you carry the document yourself, every
+    round-trip is a chance to paraphrase or drop a field. The held copy cannot
+    drift.
+
+    Pass `session_id` to the editing and query tools instead of `content`. When
+    you are done, `close_dictionary` returns the final document to save. For a
+    single edit, skip all this and pass `content` directly — stateless is simpler
+    and costs nothing extra for one call.
+
+    Args:
+        content: The dictionary to open (dd-json, LinkML YAML, or CSV,
+            auto-detected). It is validated on open, so the findings tell you what
+            you are starting from.
+
+    Returns:
+        A dict with:
+          - sessionId: the handle to pass to other tools
+          - revision: 0 — increments on each applied edit
+          - elementCount, valid, errorCount, warningCount: what you opened
+          - errors: the ERROR-level findings (capped at 10; `errorsOmitted` says
+            how many more), and otherFindings: counts by check for the rest. A
+            session reply stays small on purpose — call
+            `validate_dictionary(session_id=...)` for the full list.
+    """
+    # Normalise on the way in: the session holds dd-json, so a CSV or LinkML input
+    # is converted once here rather than on every subsequent edit.
+    document = core.export(content, "json")
+    findings = core.validate_document(content)
+    session = sessions.open(document, findings)
+    return {**session.summary(), **_findings_digest(findings)}
+
+
+@mcp.tool()
+def close_dictionary(session_id: str, compact: bool = False) -> dict:
+    """Close a session and return its final document.
+
+    The document is only in the server's memory, so this is how you get it back to
+    save it. After this the session id is dead.
+
+    Args:
+        session_id: The session to close.
+        compact: Return the document with null/empty fields omitted. Leave false
+            for a file to save, since the app writes the full form.
+
+    Returns:
+        A dict with:
+          - document: the final dictionary as dd-json text
+          - revision: how many edits were applied
+          - elementCount, valid, errorCount, warningCount
+          - errors / otherFindings: the digest from the last operation (see
+            `open_dictionary`)
+    """
+    session = sessions.close(session_id)
+    document = (
+        core.export(session.document, "json", compact=True)
+        if compact
+        else session.document
+    )
+    return {
+        **session.summary(),
+        "document": document,
+        **_findings_digest(session.findings),
+    }
+
+
+@mcp.tool()
+def list_sessions() -> dict:
+    """List the dictionaries the server is currently holding.
+
+    Useful if you have lost track of a session id, or to check what is still open
+    before finishing. Sessions last until closed or until the server restarts.
+
+    Returns:
+        {count, sessions: [{sessionId, revision, elementCount, valid,
+        errorCount, warningCount}, ...]}
+    """
+    open_sessions = sessions.list()
+    return {"count": len(open_sessions), "sessions": open_sessions}
+
+
+@mcp.tool()
+def validate_dictionary(
+    content: str = "", session_id: str = ""
+) -> dict:
     """Validate a RADx data dictionary and return findings.
 
     Accepts a data dictionary in any of the toolkit's formats — dd-json,
@@ -55,6 +236,8 @@ def validate_dictionary(content: str) -> dict:
 
     Args:
         content: The data dictionary text (dd-json, LinkML YAML, or CSV).
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            Pass exactly one of `content` or `session_id`.
 
     Returns:
         A dict with:
@@ -63,9 +246,10 @@ def validate_dictionary(content: str) -> dict:
           - findings: list of {level, check, message, line, column, value,
             elementIndex, elementId, suggestion}
     """
-    findings = core.validate_document(content)
+    document = _document(content, session_id)
+    findings = core.validate_document(document)
     return {
-        "detected": core.detect(content),
+        "detected": core.detect(document),
         "valid": not any(f.level == "ERROR" for f in findings),
         "findings": [f.as_dict() for f in findings],
     }
@@ -73,8 +257,9 @@ def validate_dictionary(content: str) -> dict:
 
 @mcp.tool()
 def add_element(
-    content: str,
     element: dict,
+    content: str = "",
+    session_id: str = "",
     index: int | None = None,
     compact: bool = False,
 ) -> dict:
@@ -110,6 +295,11 @@ def add_element(
             half the size on a typical dictionary, and accepted as input by every
             tool here, so it is the cheaper way to carry a document across
             several calls. Lossless. Leave false when producing a file to save.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            The edit applies to the held document and the reply is a summary
+            (revision, counts, ERROR findings) rather than the whole dictionary —
+            about a tenth of the traffic over a run of edits. Pass exactly one of
+            `content` or `session_id`.
 
     Field shapes:
         enumeration, missing_value_codes: a list of code objects,
@@ -124,24 +314,26 @@ def add_element(
         precondition: a string in the grammar documented under `edit_element`.
 
     Returns:
-        A dict with:
-          - document: the updated dictionary as dd-json text
-          - valid: true if there are no ERROR-level findings
-          - findings: list of findings (same shape as validate_dictionary)
+        With `content`: {document, valid, findings} — the whole updated dictionary
+        as dd-json. With `session_id`: {sessionId, revision, elementCount, valid,
+        errorCount, warningCount, findings} — no document, since the server kept
+        it; `close_dictionary` hands it back at the end.
     """
-    result = core.add_element(content, element, index=index, compact=compact)
-    return {
-        "document": result.document,
-        "valid": not any(f.level == "ERROR" for f in result.findings),
-        "findings": [f.as_dict() for f in result.findings],
-    }
+    return _edit(
+        content,
+        session_id,
+        lambda doc: core.add_element(
+            doc, element, index=index, compact=compact
+        ),
+    )
 
 
 @mcp.tool()
 def edit_element(
-    content: str,
     element_id: str,
     changes: dict,
+    content: str = "",
+    session_id: str = "",
     compact: bool = False,
 ) -> dict:
     """Change fields on one element; return the updated document + findings.
@@ -186,6 +378,11 @@ def edit_element(
             half the size on a typical dictionary, and accepted as input by every
             tool here, so it is the cheaper way to carry a document across
             several calls. Lossless. Leave false when producing a file to save.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            The edit applies to the held document and the reply is a summary
+            (revision, counts, ERROR findings) rather than the whole dictionary —
+            about a tenth of the traffic over a run of edits. Pass exactly one of
+            `content` or `session_id`.
 
     Field shapes:
         enumeration, missing_value_codes: a list of code objects,
@@ -225,24 +422,26 @@ def edit_element(
         findings on a document that was accepted.
 
     Returns:
-        A dict with:
-          - document: the updated dictionary as dd-json text
-          - valid: true if there are no ERROR-level findings
-          - findings: list of findings (same shape as validate_dictionary)
+        With `content`: {document, valid, findings} — the whole updated dictionary
+        as dd-json. With `session_id`: {sessionId, revision, elementCount, valid,
+        errorCount, warningCount, findings} — no document, since the server kept
+        it; `close_dictionary` hands it back at the end.
     """
-    result = core.edit_element(content, element_id, changes, compact=compact)
-    return {
-        "document": result.document,
-        "valid": not any(f.level == "ERROR" for f in result.findings),
-        "findings": [f.as_dict() for f in result.findings],
-    }
+    return _edit(
+        content,
+        session_id,
+        lambda doc: core.edit_element(
+            doc, element_id, changes, compact=compact
+        ),
+    )
 
 
 @mcp.tool()
 def remove_element(
-    content: str,
     element_id: str | None = None,
     index: int | None = None,
+    content: str = "",
+    session_id: str = "",
     compact: bool = False,
 ) -> dict:
     """Delete one element; return the updated document + findings.
@@ -278,24 +477,33 @@ def remove_element(
             half the size on a typical dictionary, and accepted as input by every
             tool here, so it is the cheaper way to carry a document across
             several calls. Lossless. Leave false when producing a file to save.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            The edit applies to the held document and the reply is a summary
+            (revision, counts, ERROR findings) rather than the whole dictionary —
+            about a tenth of the traffic over a run of edits. Pass exactly one of
+            `content` or `session_id`.
 
     Returns:
-        A dict with:
-          - document: the updated dictionary as dd-json text
-          - valid: true if there are no ERROR-level findings
-          - findings: list of findings (same shape as validate_dictionary)
+        With `content`: {document, valid, findings} — the whole updated dictionary
+        as dd-json. With `session_id`: {sessionId, revision, elementCount, valid,
+        errorCount, warningCount, findings} — no document, since the server kept
+        it; `close_dictionary` hands it back at the end.
     """
-    result = core.remove_element(content, element_id, index=index, compact=compact)
-    return {
-        "document": result.document,
-        "valid": not any(f.level == "ERROR" for f in result.findings),
-        "findings": [f.as_dict() for f in result.findings],
-    }
+    return _edit(
+        content,
+        session_id,
+        lambda doc: core.remove_element(
+            doc, element_id, index=index, compact=compact
+        ),
+    )
 
 
 @mcp.tool()
 def reorder_elements(
-    content: str, order: list[str], compact: bool = False
+    order: list[str],
+    content: str = "",
+    session_id: str = "",
+    compact: bool = False,
 ) -> dict:
     """Reorder a dictionary's elements; return the updated document + findings.
 
@@ -322,19 +530,23 @@ def reorder_elements(
             half the size on a typical dictionary, and accepted as input by every
             tool here, so it is the cheaper way to carry a document across
             several calls. Lossless. Leave false when producing a file to save.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            The edit applies to the held document and the reply is a summary
+            (revision, counts, ERROR findings) rather than the whole dictionary —
+            about a tenth of the traffic over a run of edits. Pass exactly one of
+            `content` or `session_id`.
 
     Returns:
-        A dict with:
-          - document: the updated dictionary as dd-json text
-          - valid: true if there are no ERROR-level findings
-          - findings: list of findings (same shape as validate_dictionary)
+        With `content`: {document, valid, findings} — the whole updated dictionary
+        as dd-json. With `session_id`: {sessionId, revision, elementCount, valid,
+        errorCount, warningCount, findings} — no document, since the server kept
+        it; `close_dictionary` hands it back at the end.
     """
-    result = core.reorder_elements(content, order, compact=compact)
-    return {
-        "document": result.document,
-        "valid": not any(f.level == "ERROR" for f in result.findings),
-        "findings": [f.as_dict() for f in result.findings],
-    }
+    return _edit(
+        content,
+        session_id,
+        lambda doc: core.reorder_elements(doc, order, compact=compact),
+    )
 
 
 @mcp.tool()
@@ -343,6 +555,7 @@ def import_redcap(
     provenance: str = "",
     allow_duplicates: bool = False,
     compact: bool = False,
+    open_session: bool = False,
 ) -> dict:
     """Convert a REDCap data-dictionary export into a dd-json dictionary.
 
@@ -373,6 +586,12 @@ def import_redcap(
             half the size on a typical dictionary, and accepted as input by every
             tool here, so it is the cheaper way to carry a document across
             several calls. Lossless. Leave false when producing a file to save.
+        open_session: Keep the converted dictionary server-side and return a
+            session id instead of the document. A converted REDCap dictionary
+            usually needs a run of follow-up edits (units, descriptions), so this
+            saves shipping it back and forth; `close_dictionary` returns it at the
+            end. There is no `session_id` parameter here because this tool creates
+            a document rather than editing an existing one.
 
     Returns:
         A dict with:
@@ -386,11 +605,21 @@ def import_redcap(
         content,
         provenance=provenance,
         allow_duplicates=allow_duplicates,
-        compact=compact,
+        # A session holds dd-json in one canonical form; only compact the
+        # document when the caller is the one carrying it away.
+        compact=compact and not open_session,
     )
+    element_count = len(core.list_elements(result.document))
+
+    # import_redcap has no input document, so a session_id parameter would make no
+    # sense here — the choice is whether to keep the *output* server-side.
+    if open_session:
+        session = sessions.open(result.document, result.findings)
+        return {**session.summary(), **_findings_digest(result.findings)}
+
     return {
         "document": result.document,
-        "elementCount": len(core.list_elements(result.document)),
+        "elementCount": element_count,
         "valid": not any(f.level == "ERROR" for f in result.findings),
         "findings": [f.as_dict() for f in result.findings],
     }
@@ -433,7 +662,8 @@ def lookup_terms(terms: list[str], timeout: float = 15.0) -> dict:
 
 @mcp.tool()
 def list_elements(
-    content: str,
+    content: str = "",
+    session_id: str = "",
     section: str | None = None,
     datatype: str | None = None,
     missing_field: str | None = None,
@@ -450,34 +680,47 @@ def list_elements(
         datatype: Only elements of this datatype (e.g. "integer").
         missing_field: Only elements whose named field is empty — for coverage
             questions like which elements lack a "unit" or "description".
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            Pass exactly one of `content` or `session_id`.
 
     Returns:
         {count, elements: [{id, label, datatype, section}, ...]}
     """
     elements = core.list_elements(
-        content, section=section, datatype=datatype, missing_field=missing_field
+        _document(content, session_id),
+        section=section,
+        datatype=datatype,
+        missing_field=missing_field,
     )
     return {"count": len(elements), "elements": elements}
 
 
 @mcp.tool()
-def get_element(content: str, element_id: str) -> dict:
+def get_element(
+    element_id: str,
+    content: str = "",
+    session_id: str = "",
+) -> dict:
     """Return the full detail of one element by id.
 
     Args:
         content: The dictionary (dd-json, LinkML YAML, or CSV, auto-detected).
         element_id: The id of the element to fetch.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+            Pass exactly one of `content` or `session_id`.
 
     Returns:
         {found: bool, element: <full dd-json element> | null}. If the id is
         duplicated, the first occurrence is returned.
     """
-    element = core.get_element(content, element_id)
+    element = core.get_element(_document(content, session_id), element_id)
     return {"found": element is not None, "element": element}
 
 
 @mcp.tool()
-def describe_dictionary(content: str) -> dict:
+def describe_dictionary(
+    content: str = "", session_id: str = ""
+) -> dict:
     """Summarise a dictionary: size, sections, datatypes in use, validity.
 
     A quick orientation before querying or editing — how big the dictionary is,
@@ -490,11 +733,16 @@ def describe_dictionary(content: str) -> dict:
         {elementCount, sections, datatypes: {name: count}, valid, errorCount,
         warningCount}
     """
-    return core.describe_dictionary(content)
+    return core.describe_dictionary(_document(content, session_id))
 
 
 @mcp.tool()
-def export(content: str, to: str = "csv", compact: bool = False) -> dict:
+def export(
+    to: str = "csv",
+    content: str = "",
+    session_id: str = "",
+    compact: bool = False,
+) -> dict:
     """Serialise a dictionary to another format.
 
     Args:
@@ -512,7 +760,9 @@ def export(content: str, to: str = "csv", compact: bool = False) -> dict:
     """
     return {
         "format": to,
-        "content": core.export(content, to, compact=compact),
+        "content": core.export(
+            _document(content, session_id), to, compact=compact
+        ),
     }
 
 
