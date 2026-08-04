@@ -24,3 +24,4 @@ release/
 # holds the app icons and is tracked.
 sidecar/build/
 core/build/
+mcp-server/build/

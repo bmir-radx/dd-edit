@@ -3,7 +3,7 @@
 The shared, transport-free data-dictionary core for dd-edit: format detection,
 multi-format loading, and validation over the `dd-*` toolkit. No FastAPI, no MCP.
 
-Both the app's Python sidecar (`../sidecar`) and the MCP server (`../mcp`) depend
+Both the app's Python sidecar (`../sidecar`) and the MCP server (`../mcp-server`) depend
 on this, so they agree on how a dictionary parses and validates rather than each
 keeping its own copy. Feature-detection against the pinned toolkit release
 (duplicate-id handling, LinkML emit options) lives here, so a toolkit bump is
