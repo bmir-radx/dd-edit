@@ -9,12 +9,24 @@ from __future__ import annotations
 import json
 
 import pytest
+from mcp.client import Client
+from mcp.client._memory import InMemoryTransport
 
 from dd_edit_mcp import core, server
 
 
 def _ids(dd_json_text: str) -> list[str]:
     return [e["id"] for e in json.loads(dd_json_text)["elements"]]
+
+
+def connect() -> Client:
+    """An MCP client wired to our server in-process, no network or subprocess.
+
+    The protocol round-trips below are what catch a tool that is broken at the
+    MCP layer rather than in core — a bad signature, an unserialisable result.
+    """
+    return Client(InMemoryTransport(server.mcp))
+
 
 # Fixtures lifted from the sidecar's tests, so both agree on behaviour.
 VALID_CSV = (
@@ -185,11 +197,7 @@ def test_edit_element_refuses_to_clear_required_fields():
 
 @pytest.mark.asyncio
 async def test_edit_element_over_mcp():
-    from mcp.shared.memory import (
-        create_connected_server_and_client_session as connect,
-    )
-
-    async with connect(server.mcp._mcp_server) as client:
+    async with connect() as client:
         assert "edit_element" in {
             t.name for t in (await client.list_tools()).tools
         }
@@ -207,11 +215,7 @@ async def test_edit_element_over_mcp():
 
 @pytest.mark.asyncio
 async def test_add_element_over_mcp():
-    from mcp.shared.memory import (
-        create_connected_server_and_client_session as connect,
-    )
-
-    async with connect(server.mcp._mcp_server) as client:
+    async with connect() as client:
         tools = {t.name for t in (await client.list_tools()).tools}
         assert {"validate_dictionary", "add_element"} <= tools
 
@@ -227,11 +231,7 @@ async def test_add_element_over_mcp():
 
 @pytest.mark.asyncio
 async def test_validate_dictionary_over_mcp():
-    from mcp.shared.memory import (
-        create_connected_server_and_client_session as connect,
-    )
-
-    async with connect(server.mcp._mcp_server) as client:
+    async with connect() as client:
         tools = await client.list_tools()
         assert "validate_dictionary" in {t.name for t in tools.tools}
 
@@ -290,11 +290,7 @@ def test_export_round_trips_and_rejects_unknown():
 
 @pytest.mark.asyncio
 async def test_query_tools_over_mcp():
-    from mcp.shared.memory import (
-        create_connected_server_and_client_session as connect,
-    )
-
-    async with connect(server.mcp._mcp_server) as client:
+    async with connect() as client:
         names = {t.name for t in (await client.list_tools()).tools}
         assert {"list_elements", "get_element", "describe_dictionary",
                 "export"} <= names

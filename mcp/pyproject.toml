@@ -13,7 +13,10 @@ dependencies = [
     # The shared core carries the pinned dd-* toolkit (and format sniffing), so
     # the MCP and the app agree on parsing/validation behaviour from one place.
     "dd-edit-core",
-    "mcp>=1.2",
+    # Bounded to the 2.x major: 2.0 moved the server class (FastMCP ->
+    # mcpserver.MCPServer) and dropped the in-memory test helper, so an
+    # unbounded ">=" would break the imports again on the next major.
+    "mcp>=2,<3",
 ]
 
 # Local path to the shared core for development installs. A published build

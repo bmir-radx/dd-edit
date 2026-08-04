@@ -31,9 +31,21 @@ unchanged.
 
 ```bash
 python -m venv .venv
+.venv/bin/pip install -e ../core        # regular install, see the release note below
 .venv/bin/pip install -e ".[test]"
 .venv/bin/pytest
 ```
+
+Built against the **MCP SDK 2.x** (`mcp>=2,<3`). 2.0 renamed the server class
+(`fastmcp.FastMCP` → `mcpserver.MCPServer`) and replaced the in-memory test
+helper with `Client(InMemoryTransport(server))`, so the pin is bounded at the
+major — an unbounded `>=` is what let a major bump break the imports the first
+time. Upgrading a venv built before this: re-run the `pip install -e` above.
+
+Note this package directory is itself named `mcp/`, so it shadows the `mcp`
+library for tools that put the *parent* directory on `sys.path` — `uv run` from
+the repo root fails with `No module named 'mcp.server...'`. The venv invocations
+above are unaffected; run pytest from this directory (or an absolute path).
 
 ## Run
 
