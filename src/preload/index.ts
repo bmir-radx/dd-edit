@@ -20,4 +20,16 @@ contextBridge.exposeInMainWorld('ddEdit', {
       ipcRenderer.removeListener('menu', listener)
     }
   },
+  /**
+   * The open file changed on disk and the user chose to reload it. Main has
+   * already asked and already read the file, so the content comes with the
+   * message — the renderer only has to parse and load it.
+   */
+  onFileReloaded: (cb: (path: string, content: string) => void) => {
+    const listener = (_event: unknown, path: string, content: string) => cb(path, content)
+    ipcRenderer.on('file-reloaded', listener)
+    return () => {
+      ipcRenderer.removeListener('file-reloaded', listener)
+    }
+  },
 })

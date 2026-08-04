@@ -12,7 +12,7 @@
  */
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron'
 import { type ChildProcess, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
@@ -164,7 +164,11 @@ async function openAndRead(filters: typeof DICTIONARY_FILTERS, remember = false)
   const file = res.filePaths[0]
   if (res.canceled || !file) return null
   void (remember ? rememberFile(file) : rememberDir(file))
-  return { path: file, content: await readFile(file, 'utf8') }
+  const content = await readFile(file, 'utf8')
+  // `remember` marks a real dictionary open; an import keeps its own path and
+  // leaves the document untitled, so there is no file to track for it.
+  if (remember) trackFile(file, content)
+  return { path: file, content }
 }
 
 ipcMain.handle('sidecar-info', () => ({
@@ -181,6 +185,7 @@ ipcMain.handle('last-file', async () => {
 ipcMain.handle('file:open-path', async (_event, filePath: string) => {
   const content = await readFile(filePath, 'utf8')
   void rememberFile(filePath)
+  trackFile(filePath, content)
   return { path: filePath, content }
 })
 ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
@@ -199,6 +204,7 @@ ipcMain.handle('dialog:save-as', async (_event, defaultName: string) => {
 ipcMain.handle('file:save', async (_event, filePath: string, content: string) => {
   await writeFile(filePath, content, 'utf8')
   void rememberFile(filePath) // a save-as target becomes the reopen candidate
+  trackFile(filePath, content) // our own write is not an external change
 })
 // The standard "save your changes?" three-button sheet, for replacing the
 // current document (New / Open / Import with unsaved edits). The renderer
@@ -317,6 +323,113 @@ ipcMain.on('dirty-changed', (_event, dirty: boolean) => {
   isDirty = dirty
 })
 
+// ------------------------------------------------- external change detection
+//
+// The open file can change underneath us — another editor, a git checkout, or
+// the dd-edit MCP writing a dictionary. We notice on window focus, the moment
+// the user looks at the app: a prompt can never interrupt typing, and there is
+// no watcher to fight macOS's atomic-rename saves (which fire spurious events).
+//
+// Identity is the file's *content hash*, not its mtime: a tool that rewrites a
+// file byte-identically, or touches it, must not raise a prompt about nothing.
+
+/** The open file and the hash of what we believe is on disk. */
+let openFile: { path: string; hash: string } | null = null
+
+function hashOf(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+/**
+ * Record what the app now considers the file's on-disk state.
+ *
+ * Called on every open and every save, so the app's own writes never look like
+ * an external change. Passing a null path (New, or an import) clears tracking.
+ */
+function trackFile(filePath: string | null, content: string): void {
+  openFile = filePath === null ? null : { path: filePath, hash: hashOf(content) }
+}
+
+/**
+ * Has the open file changed on disk since we last read or wrote it?
+ *
+ * Returns the new content when it has, so the caller does not read twice. A
+ * file that has been deleted or become unreadable returns null: it is not a
+ * *change* to reload, and nagging about a file the user may have moved
+ * deliberately would be worse than staying quiet.
+ */
+async function externalChange(): Promise<{ path: string; content: string } | null> {
+  if (openFile === null) return null
+  let content: string
+  try {
+    content = await readFile(openFile.path, 'utf8')
+  } catch {
+    return null
+  }
+  if (hashOf(content) === openFile.hash) return null
+  return { path: openFile.path, content }
+}
+
+/**
+ * Ask whether to reload a file that changed on disk. Returns true to reload.
+ *
+ * Two shapes, because the stakes differ. With no unsaved edits a reload costs
+ * nothing, so this is a plain question. With unsaved edits it is a warning: the
+ * reload replaces the document *and* clears undo/redo (loadDocument resets both
+ * stacks), so there is no way back — the detail says so rather than letting the
+ * user discover it.
+ */
+function confirmReload(win: BrowserWindow, filePath: string): boolean {
+  const name = path.basename(filePath)
+  const choice =
+    isDirty ?
+      dialog.showMessageBoxSync(win, {
+        type: 'warning',
+        message: `${name} has changed on disk, and you have unsaved changes.`,
+        detail:
+          'Reloading replaces this document with the version on disk. Your ' +
+          'unsaved changes, and your undo history, will be lost.',
+        buttons: ['Reload and Lose Changes', 'Keep My Changes'],
+        defaultId: 1, // the safe option: never destroy work on a stray Return
+        cancelId: 1,
+      })
+    : dialog.showMessageBoxSync(win, {
+        type: 'question',
+        message: `${name} has changed on disk.`,
+        detail: 'Reload it to see the new version. Your undo history will be cleared.',
+        buttons: ['Reload', 'Keep Current Version'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+  return choice === 0
+}
+
+/**
+ * On focus: if the open file changed on disk, offer to reload it.
+ *
+ * Guarded against re-entry — showMessageBoxSync pumps the event loop, so a
+ * second focus event can arrive while the sheet is up and stack a duplicate.
+ */
+let checkingExternal = false
+
+async function checkExternalChange(win: BrowserWindow): Promise<void> {
+  if (checkingExternal) return
+  checkingExternal = true
+  try {
+    const changed = await externalChange()
+    if (changed === null) return
+    if (confirmReload(win, changed.path)) {
+      win.webContents.send('file-reloaded', changed.path, changed.content)
+    }
+    // Either way, this is now the disk state we know about: declining a reload
+    // must not re-ask on every focus. The renderer holding a different document
+    // is what `dirty` already represents.
+    trackFile(changed.path, changed.content)
+  } finally {
+    checkingExternal = false
+  }
+}
+
 // Resolve the app icon PNG for the Windows/Linux window. Packaged builds keep
 // build/ next to the app resources; in dev it sits at the project root.
 function appIcon(): string {
@@ -338,6 +451,11 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+  // Notice a file that changed underneath us the moment the user looks at the
+  // app — another editor, a git checkout, or the dd-edit MCP writing a file.
+  win.on('focus', () => {
+    void checkExternalChange(win)
   })
   win.on('close', (event) => {
     if (!isDirty) return
