@@ -274,10 +274,14 @@ Not solved now — flagged so phase-1/2 choices leave room.
 - The console entry point reports its version from package metadata
   (`importlib.metadata`), so a client's handshake shows something meaningful
   instead of an empty string. Keep that in step with `pyproject.toml`'s version.
-- This package directory is named `mcp/` and therefore shadows the `mcp` library
-  for any tool that puts the repo root on `sys.path` (`uv run` from the root is
-  the one that bites). Worth renaming the directory if the MCP becomes the
-  primary artifact; harmless while venv-based invocation is the documented path.
+- **The package directory is `mcp-server/`, not `mcp/`** — resolved. A directory
+  named `mcp` shadows the `mcp` library for any tool that puts the repo root on
+  `sys.path`, so `uv run` from the root failed with
+  `No module named 'mcp.server...'` while venv-based invocation worked, which is
+  the sort of split that wastes an afternoon. A hyphen cannot be a module name, so
+  the class of bug is gone rather than documented. The Python package stays
+  `dd_edit_mcp` and the console script stays `dd-edit-mcp`; only the directory
+  moved.
 
 ## Open questions
 
