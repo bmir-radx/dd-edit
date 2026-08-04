@@ -132,6 +132,25 @@ Notes:
   Every editing tool shares this round-trip tail (`core._apply`) so the rule is
   stated once and the tools cannot drift apart — every editing tool goes through
   it.
+- **`lookup_terms` is the only impure tool, and it fails soft.** Everything else
+  is offline and deterministic; this one queries OLS4. A term that does not
+  resolve is *absent* from the result rather than an error (it may be private,
+  retired, or mistyped), so the tool also returns `unresolved` to make the misses
+  explicit rather than something the caller has to diff for. Batches are
+  de-duplicated and capped at 100, matching the sidecar's `/terms`, so one call
+  cannot fan out into hundreds of upstream lookups. Only a transport failure
+  raises. Consequence for the suite: the upstream call is stubbed by default and
+  the real path is a `live`-marked opt-in (`pytest -m live`) — an offline
+  developer, or CI without egress, must still get a green run.
+- **`import_redcap` creates a document instead of editing one**, so it is the only
+  author-group tool with no input document. It still returns `{document,
+  findings}` like the rest, because a converted dictionary is a starting point,
+  not a finished one — REDCap carries no units, so `missing-unit` findings are the
+  to-do list. REDCap's branching logic is **dropped, not translated**: its grammar
+  is not the spec's precondition grammar, and a guessed translation would be wrong
+  in ways nobody would notice. `allow_duplicates=True` keeps the first occurrence
+  of a repeated variable and silently drops the rest, which is why the tool
+  reports `elementCount` — the caller needs a way to notice the loss.
 - **Destructive tools refuse ambiguity instead of taking the first match.**
   `get_element` and `edit_element` act on the first element with a given id,
   which is fine because a duplicate id is visible in the document they return and

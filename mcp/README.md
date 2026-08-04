@@ -3,15 +3,20 @@
 An [MCP](https://modelcontextprotocol.io) server exposing RADx data-dictionary
 tools to an LLM. Design: [../docs/MCP-DESIGN.md](../docs/MCP-DESIGN.md).
 
-**Status: phase 1 in progress.** Nine tools covering the three phase-1 use
-cases — validate, query, and author. All stateless: pure functions over a
-document passed in each call. The element-editing set is complete — `add_element`,
-`edit_element`, `remove_element`, `reorder_elements` — all in the
-`(document, op) → (document, findings)` shape that must survive into the later
-session/live-app phases (phases 2–3 in the design doc). Still to come from the
-design doc's inventory: `lookup_terms`, `import_redcap`, `render_html` (the first
-two reach outside the process — a term service and a REDCap converter — so they
-are a different kind of tool from everything above).
+**Status: phase-1 tool inventory complete** except `render_html`, which the design
+doc rates low priority (a human-facing artifact, arguably the app's job). Eleven
+tools covering validate, query, and author. All stateless: every tool takes the
+document it works on, so nothing assumes a single global document — the one
+assumption a phase-2 session model would contradict.
+
+The element-editing set — `add_element`, `edit_element`, `remove_element`,
+`reorder_elements` — is uniform: pure `(document, op) → (document, findings)`,
+sharing one round-trip tail (`core._apply`), ready for a session layer to wrap
+unchanged (phases 2–3 in the design doc).
+
+`lookup_terms` is the exception to "pure and offline": it queries OLS4 over the
+network. The suite stubs it, so `pytest` stays deterministic; `pytest -m live`
+runs the one test that really goes out.
 
 ## Layout
 
@@ -35,7 +40,8 @@ unchanged.
 python -m venv .venv
 .venv/bin/pip install -e ../core        # regular install, see the release note below
 .venv/bin/pip install -e ".[test]"
-.venv/bin/pytest
+.venv/bin/pytest              # offline; the network test is deselected
+.venv/bin/pytest -m live      # just the real OLS4 lookup (needs network)
 ```
 
 Built against the **MCP SDK 2.x** (`mcp>=2,<3`). 2.0 renamed the server class
@@ -84,6 +90,8 @@ auto-detected).
 | `edit_element` | author | Change fields on one element by id; returns `{document, valid, findings}`. Pure. Omitted key = leave alone, `null` = clear, `{"id": ...}` = rename. |
 | `remove_element` | author | Delete one element by id and/or index; returns `{document, valid, findings}`. Pure. Refuses an ambiguous (duplicated) id rather than guessing. |
 | `reorder_elements` | author | Reorder elements; takes every id in the wanted order. Pure. Refuses anything but an exact permutation, so it cannot silently drop an element. |
+| `import_redcap` | author | REDCap export CSV → dd-json; `{document, elementCount, valid, findings}`. Creates a document rather than editing one. Branching logic is dropped, not translated. |
+| `lookup_terms` | query | Resolve term IRIs → labels; `{labels, unresolved}`. **The only tool that uses the network** (OLS4). Unresolved terms are absent, not errors. |
 
 Patch semantics for `edit_element` follow the app's editing model, so an LLM edit
 and a human edit mean the same thing: the app stores a cleared optional scalar as

@@ -9,6 +9,7 @@ unchanged.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 from dataclasses import dataclass
@@ -362,6 +363,109 @@ def reorder_elements(document: str, order: list[str]) -> EditResult:
     doc["elements"] = [by_id[i] for i in order]
 
     return _apply(doc, "cannot reorder elements")
+
+
+def import_redcap(
+    content: str,
+    *,
+    provenance: str = "",
+    allow_duplicates: bool = False,
+) -> EditResult:
+    """Convert a REDCap data-dictionary export into a dd-json document.
+
+    This is the one tool that *creates* a document rather than editing one, so
+    there is no input document — `content` is the REDCap CSV. The result is
+    returned with findings, like every editing tool, because a converted
+    dictionary usually needs work (REDCap carries no units, for instance) and the
+    findings are the to-do list.
+
+    REDCap's branching logic is **not** translated into a `precondition`: the two
+    grammars differ, so it is dropped rather than guessed at. Re-add any that
+    matter with `edit_element`.
+
+    Args:
+        content: the REDCap data-dictionary export, as CSV text.
+        provenance: fills every element's `provenance` field — typically the
+            study or instrument name. Recommended: it is the only record of where
+            these elements came from.
+        allow_duplicates: REDCap multi-form exports commonly repeat a shared field
+            on every form. False (default) rejects a repeated variable name; True
+            keeps the *first* occurrence and silently drops the rest, so compare
+            `elementCount` against what you expected.
+
+    Returns:
+        EditResult(document=<new dd-json text>, findings=<validation findings>).
+
+    Raises:
+        ValueError: the input is not a REDCap dictionary (no
+            'Variable / Field Name' column), or a variable name repeats and
+            `allow_duplicates` is False. dd_redcap's ConversionError is a
+            ValueError, so both arrive as one type.
+    """
+    # Imported here, not at module load: this is the only tool that needs the
+    # REDCap converter, and keeping it lazy means the other eight still work if
+    # the optional dependency is missing from an install.
+    from dd_redcap.convert import convert_redcap
+
+    try:
+        dd = convert_redcap(
+            io.StringIO(content),
+            provenance=provenance,
+            allow_duplicates=allow_duplicates,
+        )
+    except ValueError as exc:  # includes dd_redcap.ConversionError
+        raise ValueError(f"cannot convert REDCap dictionary: {exc}") from exc
+
+    # Round-trip through _apply for the same normalise-and-validate tail every
+    # editing tool uses, so an imported document is validated identically.
+    return _apply(json.loads(dd.to_json()), "cannot convert REDCap dictionary")
+
+
+# Cap on one lookup_terms call, matching the sidecar's /terms endpoint: one
+# request should not fan out into hundreds of upstream ontology lookups.
+MAX_TERMS_PER_LOOKUP = 100
+
+
+def lookup_terms(terms: list[str], *, timeout: float = 15.0) -> dict[str, str]:
+    """Resolve ontology term IRIs to human-readable labels.
+
+    The one operation here that leaves the process: it queries OLS4 over the
+    network. Everything else is pure and offline.
+
+    Unresolved terms are simply absent from the result rather than being an
+    error — a term may be private, retired, or mistyped, and the caller can tell
+    which by comparing the keys against what it asked for. Only a transport-level
+    failure raises.
+
+    Input is de-duplicated (preserving order) and capped at
+    MAX_TERMS_PER_LOOKUP, matching the sidecar, so one call cannot fan out into
+    hundreds of upstream lookups.
+
+    Args:
+        terms: term IRIs to resolve. Blanks are ignored.
+        timeout: seconds to wait on the upstream service.
+
+    Returns:
+        {iri: label} for the terms that resolved. Absent keys did not resolve.
+
+    Raises:
+        ValueError: `terms` is not a list of strings, or the lookup service could
+            not be reached at all.
+    """
+    if not isinstance(terms, list) or not all(isinstance(t, str) for t in terms):
+        raise ValueError("terms must be a list of term IRIs")
+
+    from dd_core.terms_lookup import lookup_labels
+
+    # dict.fromkeys de-duplicates while keeping first-seen order.
+    requested = [t for t in dict.fromkeys(terms) if t.strip()]
+    if not requested:
+        return {}
+
+    try:
+        return lookup_labels(requested[:MAX_TERMS_PER_LOOKUP], timeout=timeout)
+    except Exception as exc:  # network/transport failure, not the caller's fault
+        raise ValueError(f"term lookup failed: {exc}") from exc
 
 
 # ------------------------------------------------------------------ queries
