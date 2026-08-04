@@ -9,10 +9,12 @@ unchanged.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from dd_api import DataDictionary
 
@@ -611,3 +613,144 @@ def export(document: str, to: str = "csv", *, compact: bool = False) -> str:
     if to == "json":
         return dd.to_json(compact=compact)
     raise ValueError(f"unknown format {to!r}; expected csv, linkml, or json")
+
+
+# --- Saving to disk ------------------------------------------------------------
+#
+# The one place this server touches the filesystem. Every other operation is
+# text in, text out — which is why they are safe to expose to anyone. Writing
+# files is different in kind, so the boundary is drawn explicitly here rather
+# than left to each caller: a save is confined to a root directory the operator
+# chose at startup, and refuses to clobber a file that changed underneath it.
+
+FORMAT_SUFFIXES = {
+    "csv": (".csv",),
+    "linkml": (".yaml", ".yml"),
+    "json": (".json",),
+}
+
+
+def format_for_path(path: Path, to: str = "") -> str:
+    """Pick the serialisation format for a save, from `to` or the suffix.
+
+    Inferring from the extension is what makes `save_dictionary(path=...)` a
+    one-argument call in the common case; an explicit `to` still wins, for the
+    caller who wants LinkML in a file named `.txt`.
+
+    Raises:
+        ValueError: `to` is not a known format, or it was omitted and the
+            suffix does not identify one.
+    """
+    if to:
+        if to not in FORMAT_SUFFIXES:
+            raise ValueError(
+                f"unknown format {to!r}; expected csv, linkml, or json"
+            )
+        return to
+    suffix = path.suffix.lower()
+    for name, suffixes in FORMAT_SUFFIXES.items():
+        if suffix in suffixes:
+            return name
+    raise ValueError(
+        f"cannot infer a format from {path.name!r} — pass to= explicitly "
+        f"(csv, linkml, or json), or use a .csv/.yaml/.json extension"
+    )
+
+
+def resolve_save_path(path: str, root: Path | None) -> Path:
+    """Resolve a caller-supplied path, refusing to escape the save root.
+
+    `root` is the directory the operator passed at startup; None means saving is
+    disabled, which is the default. The check is done on the *resolved* path so
+    that `..` segments and symlinks cannot walk out of the root — comparing the
+    strings a caller sent would miss both.
+
+    Raises:
+        ValueError: saving is not configured, or the path lands outside root.
+    """
+    if root is None:
+        raise ValueError(
+            "saving is not enabled on this server — start it with "
+            "--save-root DIR to allow save_dictionary, or use export and "
+            "write the file yourself"
+        )
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    root_resolved = root.resolve()
+    if resolved != root_resolved and root_resolved not in resolved.parents:
+        raise ValueError(
+            f"refusing to save outside the save root: {path!r} resolves to "
+            f"{resolved}, which is not under {root_resolved}"
+        )
+    if resolved.is_dir():
+        raise ValueError(f"{resolved} is a directory, not a file")
+    return resolved
+
+
+def save_document(
+    document: str,
+    path: str,
+    *,
+    root: Path | None,
+    to: str = "",
+    expect_sha256: str = "",
+    overwrite: bool = True,
+) -> dict:
+    """Serialise a dictionary and write it, returning a summary — not the text.
+
+    The point of this tool is that the document never crosses the wire. `export`
+    hands the caller a whole dictionary so it can write the file itself, which
+    costs the caller the document twice (once out, once back); this writes it
+    server-side and returns only what was written.
+
+    `expect_sha256` is the concurrency guard: pass the digest the caller believes
+    is on disk and the write is refused if the file has changed since. That is
+    the case that actually bites — a human editing the same file in dd-edit
+    while an LLM edits a session — and it is cheap to check.
+
+    Returns:
+        {path, format, bytesWritten, sha256, existed, valid, elementCount}
+    """
+    resolved = resolve_save_path(path, root)
+    fmt = format_for_path(resolved, to)
+
+    existed = resolved.exists()
+    if existed:
+        previous = resolved.read_bytes()
+        previous_digest = hashlib.sha256(previous).hexdigest()
+        if expect_sha256 and previous_digest != expect_sha256:
+            raise ValueError(
+                f"{resolved} changed on disk since it was read (expected "
+                f"sha256 {expect_sha256[:12]}…, found {previous_digest[:12]}…) "
+                f"— re-read it and merge before saving over it"
+            )
+        if not overwrite:
+            raise ValueError(
+                f"{resolved} exists and overwrite is false; pass "
+                f"overwrite=true to replace it"
+            )
+    elif expect_sha256:
+        raise ValueError(
+            f"{resolved} does not exist, but expect_sha256 was given — pass it "
+            f"only when saving over a file you have already read"
+        )
+
+    text = export(document, fmt)
+    # newline="" so the CSV writer's \r\n line endings reach the file intact:
+    # Python would otherwise translate them on write.
+    with open(resolved, "w", newline="", encoding="utf-8") as handle:
+        handle.write(text)
+
+    written = resolved.read_bytes()
+    described = describe_dictionary(document)
+    return {
+        "path": str(resolved),
+        "format": fmt,
+        "bytesWritten": len(written),
+        "sha256": hashlib.sha256(written).hexdigest(),
+        "existed": existed,
+        "valid": described["valid"],
+        "elementCount": described["elementCount"],
+    }

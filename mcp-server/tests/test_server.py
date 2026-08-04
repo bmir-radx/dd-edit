@@ -6,6 +6,7 @@ suite covers the MCP-specific query/author tools and the protocol wiring.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -1131,3 +1132,167 @@ async def test_query_tools_over_mcp():
         res = await client.call_tool(
             "describe_dictionary", {"content": SECTIONED_CSV})
         assert json.loads(res.content[0].text)["elementCount"] == 3
+
+
+# --- save_dictionary -----------------------------------------------------------
+#
+# The only tool that touches the filesystem, so these lean on the refusals rather
+# than the happy path: a save that escapes its root, or silently discards someone
+# else's edit, is the failure that matters.
+
+
+def test_save_writes_and_reports_without_returning_the_document(tmp_path):
+    out = tmp_path / "dd.csv"
+    result = core.save_document(VALID_CSV, str(out), root=tmp_path)
+
+    assert out.exists()
+    assert result["elementCount"] == 2
+    assert result["valid"] is True
+    assert result["existed"] is False
+    assert result["bytesWritten"] == len(out.read_bytes())
+    # The point of the tool: no document in the reply.
+    assert "content" not in result and "document" not in result
+    # And what landed reloads to the same dictionary.
+    assert _ids(core.export(out.read_text(), "json")) == ["age", "sex"]
+
+
+def test_save_infers_format_from_the_extension(tmp_path):
+    for name, marker in [
+        ("dd.csv", "Id,"), ("dd.yaml", "classes:"), ("dd.json", '"format"'),
+    ]:
+        result = core.save_document(VALID_CSV, name, root=tmp_path)
+        assert marker in (tmp_path / name).read_text()
+        assert result["format"] in {"csv", "linkml", "json"}
+
+    # An unknown extension is a question, not a guess.
+    with pytest.raises(ValueError, match="cannot infer a format"):
+        core.save_document(VALID_CSV, "dd.txt", root=tmp_path)
+    # Unless the caller says which format they meant.
+    core.save_document(VALID_CSV, "dd.txt", root=tmp_path, to="csv")
+    assert (tmp_path / "dd.txt").read_text().startswith("Id,")
+
+
+def test_save_is_disabled_unless_a_root_is_configured(tmp_path):
+    with pytest.raises(ValueError, match="saving is not enabled"):
+        core.save_document(VALID_CSV, str(tmp_path / "dd.csv"), root=None)
+
+
+def test_save_refuses_to_escape_the_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.csv"
+
+    for escape in ["../outside.csv", "a/../../outside.csv", str(outside)]:
+        with pytest.raises(ValueError, match="refusing to save outside"):
+            core.save_document(VALID_CSV, escape, root=root)
+    assert not outside.exists()
+
+    # A symlink pointing out of the root is caught too — the check resolves the
+    # path rather than trusting the string the caller sent.
+    link = root / "link.csv"
+    link.symlink_to(outside)
+    with pytest.raises(ValueError, match="refusing to save outside"):
+        core.save_document(VALID_CSV, str(link), root=root)
+    assert not outside.exists()
+
+
+def test_save_refuses_a_clobber_when_the_file_changed(tmp_path):
+    out = tmp_path / "dd.csv"
+    first = core.save_document(VALID_CSV, str(out), root=tmp_path)
+
+    # Someone else edits the file (a human in dd-edit, say).
+    out.write_text("Id,Label,Datatype,Cardinality\nedited,Edited,string,single\n")
+
+    with pytest.raises(ValueError, match="changed on disk"):
+        core.save_document(
+            VALID_CSV, str(out), root=tmp_path, expect_sha256=first["sha256"]
+        )
+    assert "edited" in out.read_text()  # their edit survived
+
+    # The digest of what is actually there lets the save through.
+    current = hashlib.sha256(out.read_bytes()).hexdigest()
+    result = core.save_document(
+        VALID_CSV, str(out), root=tmp_path, expect_sha256=current
+    )
+    assert result["existed"] is True
+    assert "edited" not in out.read_text()
+
+
+def test_save_guards_against_a_pointless_digest_and_honours_overwrite(tmp_path):
+    out = tmp_path / "dd.csv"
+    # A digest for a file that does not exist is a caller mistake, not a no-op.
+    with pytest.raises(ValueError, match="does not exist"):
+        core.save_document(VALID_CSV, str(out), root=tmp_path, expect_sha256="a" * 64)
+
+    core.save_document(VALID_CSV, str(out), root=tmp_path)
+    with pytest.raises(ValueError, match="overwrite is false"):
+        core.save_document(VALID_CSV, str(out), root=tmp_path, overwrite=False)
+
+
+@pytest.mark.asyncio
+async def test_save_over_mcp_is_off_by_default_and_bounded_when_on(tmp_path):
+    async with connect() as client:
+        assert "save_dictionary" in {
+            t.name for t in (await client.list_tools()).tools
+        }
+
+        # Default: no save root, so the tool exists but refuses.
+        res = await client.call_tool(
+            "save_dictionary", {"content": VALID_CSV, "path": "dd.csv"})
+        assert "saving is not enabled" in res.content[0].text
+
+        server.SAVE_ROOT = tmp_path
+        try:
+            res = await client.call_tool(
+                "save_dictionary", {"content": VALID_CSV, "path": "dd.csv"})
+            payload = json.loads(res.content[0].text)
+            assert payload["elementCount"] == 2
+            assert (tmp_path / "dd.csv").exists()
+
+            # A session saves without the document crossing the wire.
+            opened = json.loads((await client.call_tool(
+                "open_dictionary", {"content": VALID_CSV})).content[0].text)
+            res = await client.call_tool("save_dictionary", {
+                "session_id": opened["sessionId"], "path": "from_session.yaml",
+            })
+            payload = json.loads(res.content[0].text)
+            assert payload["format"] == "linkml"
+            assert "classes:" in (tmp_path / "from_session.yaml").read_text()
+        finally:
+            server.SAVE_ROOT = None
+
+
+def test_configure_gates_saving_on_the_flag(tmp_path, monkeypatch):
+    """The --save-root flag is the security boundary, so pin it rather than
+    trust a hand-run --help."""
+    monkeypatch.setattr(server, "SAVE_ROOT", None)
+
+    # No flag: saving stays off, and the tool says so rather than writing.
+    assert server.configure([]) is None
+    with pytest.raises(ValueError, match="saving is not enabled"):
+        server.save_dictionary(path=str(tmp_path / "dd.csv"), content=VALID_CSV)
+
+    # With the flag: the root is resolved (so a relative or ~ path is absolute
+    # by the time anything is checked against it) and saving works.
+    assert server.configure(["--save-root", str(tmp_path)]) == tmp_path.resolve()
+    assert server.SAVE_ROOT == tmp_path.resolve()
+    result = server.save_dictionary(path="dd.csv", content=VALID_CSV)
+    assert (tmp_path / "dd.csv").exists()
+    assert result["elementCount"] == 2
+
+    # ...and the containment check is live over the configured root.
+    with pytest.raises(ValueError, match="refusing to save outside"):
+        server.save_dictionary(path="../escaped.csv", content=VALID_CSV)
+
+
+def test_configure_rejects_a_save_root_that_is_not_a_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SAVE_ROOT", None)
+    a_file = tmp_path / "not_a_dir"
+    a_file.write_text("")
+
+    # argparse.error exits rather than raising, which is what an operator should
+    # get on a mistyped path: a failed start, not a server that cannot save.
+    for bad in [str(a_file), str(tmp_path / "nonexistent")]:
+        with pytest.raises(SystemExit):
+            server.configure(["--save-root", bad])
+    assert server.SAVE_ROOT is None
