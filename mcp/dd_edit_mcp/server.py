@@ -42,6 +42,17 @@ def validate_dictionary(content: str) -> dict:
     id) comes back as findings, not an error. Only input the parser cannot load
     at all raises.
 
+    Checks worth knowing by name, because they are the ones an edit tends to
+    trip: `duplicate-id`; `unknown-datatype`; `missing-unit` (a numeric field
+    with no UCUM unit); and the precondition family —
+    `malformed-precondition` (syntax), `unknown-precondition-field` (refers to a
+    field that is not in the dictionary — what a rename or a removal leaves
+    behind), `invalid-precondition-comparison` (an ordering operator on an
+    unordered datatype), `invalid-precondition-contains` (`contains` on a
+    single-valued field), and the `precondition-value-*` warnings (a literal that
+    does not fit the field's datatype or enumeration). The precondition grammar
+    is documented under `edit_element`.
+
     Args:
         content: The data dictionary text (dd-json, LinkML YAML, or CSV).
 
@@ -88,7 +99,20 @@ def add_element(content: str, element: dict, index: int | None = None) -> dict:
             keys: required, unit, description, section, enumeration,
             missing_value_codes, pattern, precondition, examples, notes,
             provenance, see_also, aliases, terms. Unknown keys are rejected.
+            See "Field shapes" below for the ones that are not plain strings.
         index: 0-based position to insert at; omit to append at the end.
+
+    Field shapes:
+        enumeration, missing_value_codes: a list of code objects,
+            `[{"value": "1", "label": "Male"}, …]` — `value` is the code stored
+            in the datafile, `label` is what it means, and an optional `iri`
+            links it to a term. An item with no `value` is silently dropped, and
+            a list of bare strings (`["1", "2"]`) is silently dropped whole, so
+            always send objects with a `value`.
+        aliases, terms, examples: lists of plain strings. `terms` holds IRIs as
+            strings (`["http://purl.org/…"]`) — objects are NOT accepted here and
+            are silently mangled rather than rejected.
+        precondition: a string in the grammar documented under `edit_element`.
 
     Returns:
         A dict with:
@@ -144,6 +168,43 @@ def edit_element(content: str, element_id: str, changes: dict) -> dict:
             notes, provenance, see_also, aliases, terms. Unknown keys are
             rejected. id, label, and datatype are required fields and cannot be
             cleared.
+
+    Field shapes:
+        enumeration, missing_value_codes: a list of code objects,
+            `[{"value": "1", "label": "Male"}, …]` — `value` is the code stored
+            in the datafile, `label` is what it means, and an optional `iri`
+            links it to a term. These replace the whole list, so to add one code
+            send the existing items plus the new one (read them with
+            `get_element` first). An item with no `value` is silently dropped,
+            and a list of bare strings (`["1", "2"]`) is silently dropped whole,
+            so always send objects with a `value`.
+        aliases, terms, examples: lists of plain strings, also replaced whole.
+            `terms` holds IRIs as strings (`["http://purl.org/…"]`) — objects are
+            NOT accepted here and are silently mangled rather than rejected.
+
+    Precondition grammar:
+        A `precondition` says when the field applies. It is a string in this
+        grammar ("and" binds tighter than "or"):
+
+            expression := clause (("and" | "or") clause)*
+            clause     := predicate | "(" expression ")"
+            predicate  := fieldId ("=" | "<>" | "<" | "<=" | ">" | ">=") literal
+                        | fieldId "<>" ""            (i.e. the field is not blank)
+                        | fieldId "in" "{" literal ("," literal)* "}"
+                        | fieldId "contains" literal
+            literal    := "quoted string" | bare numeral
+
+        Examples: `age >= 18`, `sex = "1"`, `age >= 18 and sex <> "2"`,
+        `race in {"1", "2", "3"}`, `symptoms contains "fever"`, `consent <> ""`.
+
+        Rules the validator enforces, so check the findings: the field ids must
+        exist in this dictionary; `<` `<=` `>` `>=` need an ordered (numeric or
+        temporal) datatype; `contains` needs cardinality "multiple"; and a value
+        compared against an enumerated field should be one of its codes.
+
+        Note the asymmetry: a *malformed* precondition is rejected outright (the
+        model cannot hold it), whereas the semantic problems above come back as
+        findings on a document that was accepted.
 
     Returns:
         A dict with:
