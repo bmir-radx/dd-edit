@@ -14,7 +14,9 @@ Run:  python -m dd_edit_mcp.server      (stdio; wire into an MCP client)
 
 from __future__ import annotations
 
+import argparse
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
@@ -31,6 +33,11 @@ mcp = MCPServer("dd-edit", version=_VERSION)
 # Phase-2 session state. One store per server process; a stdio server serves one
 # client, so this is that client's set of open documents.
 sessions = SessionStore()
+
+# Where save_dictionary is allowed to write, set from --save-root at startup.
+# None — the default — means saving is disabled entirely: this server does not
+# touch the filesystem unless the operator opts in and says where.
+SAVE_ROOT: Path | None = None
 
 
 def _document(content: str, session_id: str) -> str:
@@ -774,7 +781,118 @@ def export(
     }
 
 
+@mcp.tool()
+def save_dictionary(
+    path: str,
+    content: str = "",
+    session_id: str = "",
+    to: str = "",
+    expect_sha256: str = "",
+    overwrite: bool = True,
+) -> dict:
+    """Write a dictionary to a file, returning a summary rather than the text.
+
+    Prefer this over `export` when the goal is a file on disk. `export` hands you
+    the whole dictionary so you can write it yourself, which means the document
+    crosses the wire twice — once out to you, once back in whatever write tool
+    you use. This serialises and writes it here, and returns only what was
+    written: on a 20-element dictionary that is a few hundred bytes instead of
+    around ten thousand, twice.
+
+    Saving is **off unless the server was started with `--save-root DIR`**, and
+    every path is confined to that directory: an absolute path outside it, or a
+    relative one with `..` segments that escapes it, is refused. Relative paths
+    resolve against the root.
+
+    The format comes from the file extension (`.csv`, `.yaml`/`.yml`, `.json`)
+    unless you pass `to` explicitly.
+
+    Concurrency: if a human may have the same file open (in dd-edit, say), read
+    it first and pass its digest as `expect_sha256`. The write is then refused if
+    the file changed underneath you, instead of silently discarding their edits.
+
+    Args:
+        path: Where to write, absolute or relative to the save root.
+        content: The dictionary to save (dd-json, LinkML YAML, or CSV,
+            auto-detected). Pass exactly one of `content` or `session_id`.
+        session_id: An open session from `open_dictionary`, instead of `content`.
+        to: Format override — "csv", "linkml", or "json". Inferred from the
+            extension when omitted.
+        expect_sha256: The digest you believe the file currently has. Refuses the
+            write on a mismatch. Pass only when saving over a file you have read.
+        overwrite: Set false to refuse rather than replace an existing file.
+
+    Returns:
+        A dict with:
+          - path: the resolved absolute path written
+          - format, bytesWritten, sha256: what landed on disk
+          - existed: whether a file was replaced
+          - valid, elementCount: what was saved, from the same check
+            `describe_dictionary` runs
+
+    Raises:
+        ValueError: saving not enabled, path outside the root, unknown or
+            un-inferable format, digest mismatch, or overwrite refused.
+    """
+    return core.save_document(
+        _document(content, session_id),
+        path,
+        root=SAVE_ROOT,
+        to=to,
+        expect_sha256=expect_sha256,
+        overwrite=overwrite,
+    )
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="dd-edit-mcp")
+    parser.add_argument(
+        "--save-root",
+        metavar="DIR",
+        help=(
+            "enable save_dictionary, confined to DIR. Omitted: saving is "
+            "disabled and callers use export plus their own write tool."
+        ),
+    )
+    return parser
+
+
+def configure(argv: list[str] | None = None) -> Path | None:
+    """Apply command-line configuration and return the resulting save root.
+
+    Split out of `main` so the flag that gates filesystem access is testable
+    without starting a server: this *is* the security boundary, so "I ran --help
+    once by hand" is not enough to know it holds. Returns the root it set, so a
+    test can assert on the value rather than reach into module state.
+
+    A `--save-root` that is not a directory is a startup error, not a warning —
+    an operator who meant to enable saving should find out now, and one who
+    mistyped a path should not get a server that silently cannot save.
+    """
+    global SAVE_ROOT
+
+    parser = _parser()
+    args = parser.parse_args(argv)
+
+    if args.save_root:
+        root = Path(args.save_root).expanduser().resolve()
+        if not root.is_dir():
+            parser.error(f"--save-root {args.save_root!r} is not a directory")
+        SAVE_ROOT = root
+
+    return SAVE_ROOT
+
+
 def main() -> None:
+    """Run the server over stdio.
+
+    `--save-root DIR` opts into `save_dictionary` and bounds it to DIR. It is off
+    by default: every other tool in this server is text in, text out, and that is
+    what makes it safe to hand to an arbitrary client. Writing files is a
+    different kind of capability, so it is the operator's explicit choice, with a
+    directory they picked — not a flag the model can set.
+    """
+    configure()
     mcp.run()
 
 

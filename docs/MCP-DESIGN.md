@@ -87,7 +87,9 @@ Two things earn most of that, and only one was obvious:
   `errorsOmitted`); everything else is counts by check, with the full list a
   `validate_dictionary(session_id=…)` away. The general lesson: in a session
   design, *anything* proportional to document size has to be paged or summarised,
-  not just the document.
+  not just the document. `save_dictionary` is the next application of that lesson
+  — saving via `export` sends the document out and back, which put the whole
+  dictionary on the wire twice per save even with a session open.
 
 No expiry, in-memory, process-scoped: a document a client is editing must not
 evaporate mid-conversation, and for a stdio server the process *is* the
@@ -138,6 +140,12 @@ already does this, so each is a known quantity.
 | `reorder_elements` | model mutation | change element order via a full id permutation (order is semantic — see DESIGN.md) |
 | `lookup_terms` | `dd_core.terms_lookup.lookup_labels` (`POST /terms`) | resolve unit/CDE IRIs → labels for suggestions |
 | `import_redcap` | `dd_redcap.convert_redcap` (`POST /import/redcap`) | REDCap export CSV → dd-json document |
+
+### Save  *(the one tool that touches the filesystem — opt-in)*
+
+| Tool | Wraps | Purpose |
+| --- | --- | --- |
+| `save_dictionary` | `export` + a bounded file write | serialise to a path and return a summary, not the text; off unless the server is started with `--save-root DIR` |
 
 Notes:
 - Every editing tool returns `{document, findings}` — the caller sees validity
@@ -194,6 +202,64 @@ Notes:
   rewrite references elsewhere; a dangling reference shows up in the findings.
 - `GET /health`-equivalent version reporting belongs in the MCP server's
   initialize/metadata, not a tool.
+
+## Writing files (`save_dictionary`)
+
+Every other tool here is text in, text out. That is what makes the server safe to
+hand to an arbitrary client, and it was the assumption behind "the app writes the
+file" in the `compact` decision below. `save_dictionary` is the one exception, and
+it exists for a measured reason.
+
+**The problem it solves is token cost, not convenience.** Without it, saving means
+`export` → the caller writes the file itself. The document therefore crosses the
+wire *twice*: once in the export reply, once in the caller's write call. On a
+22-element dictionary that is ~3.1k tokens each way. `save_dictionary` returns
+`{path, format, bytesWritten, sha256, existed, valid, elementCount}` — ~64 tokens,
+and the document never leaves the server. Over a working session that repeatedly
+edits and saves, this dominates. Measured on the seven saves of one real authoring
+run (six CSV, one LinkML, a 22-element dictionary): **~50.7k tokens via `export`
+plus a write, against ~450 via this tool.**
+
+That is the same argument as sessions (below), one step further: a session stops
+the *document* round-tripping on every edit, and this stops it round-tripping on
+every save.
+
+**The boundary is drawn in three places, because a filesystem tool exposed to a
+model is a different risk class from a pure one:**
+
+- **Off by default.** The tool is always listed, but refuses unless the server was
+  started with `--save-root DIR`. The operator opts in and picks the directory;
+  the model cannot set it, and a client that never passes the flag gets the old
+  text-in/text-out server. Listing it unconditionally is deliberate — a tool that
+  appears only sometimes is harder for a caller to reason about than one that
+  explains why it is refusing.
+- **Confined to the root.** Paths resolve (`Path.resolve()`) *before* the
+  containment check, so a `..` path, an absolute path elsewhere, and a symlinked
+  *destination* are all refused. Checking the string the caller sent would catch
+  none of them. Relative paths resolve against the root. Known limit: because
+  `resolve()` follows every component, a symlinked *intermediate directory* inside
+  the root leads somewhere the check then accepts as legitimate. That is only
+  reachable by someone who can already create directories in the root, which is a
+  directory the operator chose — so it is recorded rather than defended against.
+  Walking each component would close it if the root ever becomes shared.
+- **Refuses to clobber silently.** `expect_sha256` is the concurrency guard: pass
+  the digest you believe is on disk and the write is refused if the file changed
+  since. This is not hypothetical — it is exactly the phase-3 conflict case
+  arriving early, with a human editing a file in dd-edit while an LLM edits a
+  session of the same document. Passing a digest for a file that does not exist is
+  an error rather than a no-op, because it always means the caller is confused
+  about what it is overwriting.
+
+**Format comes from the extension** (`.csv`, `.yaml`/`.yml`, `.json`), with `to=`
+as an override. An unrecognised extension is refused rather than guessed.
+
+**Relationship to phase 3.** This does not replace the phase-3 answer, and should
+not grow into one. There, the file on disk is the app's business: the MCP edits
+the document open in dd-edit and the app saves it, with the undo stack and change
+notification intact. `save_dictionary` is for the case phase 3 does not cover —
+an agent authoring a dictionary with no app running — and its `expect_sha256`
+check is a stopgap for concurrency, not the conflict model. If phase 3 lands and
+the "no app running" case turns out to be rare, this is a candidate for removal.
 
 ## Stateless tool signature (the shape that survives into phase 2)
 
@@ -277,7 +343,12 @@ Not solved now — flagged so phase-1/2 choices leave room.
   commands too, or the human's undo and the LLM's edits desynchronise.
 - **Conflict model.** Two editors on one document need *some* answer for
   simultaneous edits, even if v1 of phase 3 is "last-writer-wins with a
-  notification."
+  notification." `save_dictionary`'s `expect_sha256` is a first, narrow instance
+  of the problem — compare-and-swap on a *file* — and it is worth noting that the
+  case showed up in practice long before phase 3: a human had the CSV open in
+  dd-edit while an LLM was overwriting it from a session. Whatever phase 3
+  chooses should subsume that check rather than sit beside it, since a document
+  reachable in the app is the more precise thing to guard than the bytes on disk.
 
 ## Packaging & distribution (adoption)
 
@@ -299,9 +370,13 @@ Not solved now — flagged so phase-1/2 choices leave room.
   bare strings is dropped whole, and `terms` given objects is stringified and
   split on whitespace. `tests/test_server.py` pins each documented claim, so the
   docs cannot rot into lies without a test failing.
-- All nine descriptions together are ~13 KB (~3.2k tokens), shipped on every
-  request. Worth tracking as tools are added; `edit_element` alone is a third of
-  it, which is the right place to spend it.
+- Descriptions plus input schemas are shipped on every request, so they are a
+  standing cost: **15 tools, ~29 KB (~7.5k tokens)** as of `save_dictionary` —
+  up from ~13 KB at nine tools, as sessions and saving landed. `edit_element`
+  alone is ~5.9 KB, which is the right place to spend it (it carries the
+  precondition grammar). Worth re-measuring rather than estimating when tools are
+  added; the number above came from `list_tools()` over the in-process client, the
+  same path `tests/test_server.py` uses.
 - **Bound the MCP SDK dependency at the major** (`mcp>=2,<3`). The original
   `mcp>=1.2` was unbounded, so SDK 2.0 — which renamed `fastmcp.FastMCP` to
   `mcpserver.MCPServer` and dropped `shared.memory`'s test helper — was resolved
@@ -352,5 +427,6 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Session API | optional `session_id` alongside `content`, not separate `session_*` tools | doubling the tool count would double the description budget an LLM reads, for near-duplicates; sharing one path means an edit cannot mean two things |
 | Absent-argument sentinel | `content: str = ""`, **not** `str \| None` | the SDK pre-parses a string argument into JSON unless the annotation is exactly `str` (`func_metadata.pre_parse_json`), so `str \| None` silently turned a dd-json document into a dict — caught only by feeding a returned document back in |
 | Session reply findings | ERRORs in full (capped), the rest as counts by check | findings scale with the document, which is precisely what a session exists to avoid; returning all of them cost 16.7 KB against a 105-byte summary |
-| `compact` output | opt-in on every document-returning tool; full form is the default | halves the bytes a stateless caller carries, losslessly; the default stays full because the app writes every field and a file for disk should match |
+| `compact` output | opt-in on every document-returning tool; full form is the default | halves the bytes a stateless caller carries, losslessly; the default stays full because a file for disk should carry every field, as the app's writes do |
+| Writing files | one opt-in tool (`save_dictionary`), off unless `--save-root DIR` | the document crossing the wire twice per save (out via `export`, back via the caller's write) is the dominant token cost in an authoring run — measured at ~50.7k tokens across one run's seven saves, against ~450 for summary replies. Confined to an operator-chosen root, resolved before the containment check so a `..` path or a symlinked destination cannot escape, with an optional `expect_sha256` compare-and-swap. Every other tool stays text-in/text-out, which is what makes them safe to expose unconditionally |
 | Reorder shape | full id list, must be an exact permutation | declarative and order-of-operations-free; the permutation check is what stops a truncated list from silently dropping elements. The app's `moveElement(from, to)` is a drag-and-drop affordance, not the right shape for a caller that cannot see the grid or track shifting indices across calls |
