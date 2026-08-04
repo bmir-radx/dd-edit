@@ -57,3 +57,56 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  core:
+    name: Core tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: core/pyproject.toml
+
+      - name: Install core with test extras
+        run: pip install -e ".[test]"
+
+      - name: Run tests
+        run: pytest
+
+  mcp:
+    name: MCP server tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            mcp-server/pyproject.toml
+            core/pyproject.toml
+
+      - name: Install the MCP server with test extras
+        # Same path-dependency rule as the sidecar: core is not on PyPI.
+        run: |
+          pip install -e ../core
+          pip install -e ".[test]"
+
+      # The lookup_terms tests that hit OLS4 are marked `live` and excluded by
+      # default, so CI stays green without egress to a third-party service.
+      - name: Run tests
+        run: pytest
