@@ -113,7 +113,7 @@ already does this, so each is a known quantity.
 | `add_element` | model mutation + re-validate | append/insert an element; returns new doc + findings |
 | `edit_element` | model mutation + re-validate | change fields on an element by id |
 | `remove_element` | model mutation + re-validate | delete an element by id and/or index (refuses an ambiguous id) |
-| `reorder_elements` | model mutation | change element order (order is semantic — see DESIGN.md) |
+| `reorder_elements` | model mutation | change element order via a full id permutation (order is semantic — see DESIGN.md) |
 | `lookup_terms` | `dd_core.terms_lookup.lookup_labels` (`POST /terms`) | resolve unit/CDE IRIs → labels for suggestions |
 | `import_redcap` | `dd_redcap.convert_redcap` (`POST /import/redcap`) | REDCap export CSV → dd-json document |
 
@@ -130,8 +130,8 @@ Notes:
   the offending change rather than a line of the internal CSV round-trip. Worth
   revisiting if the toolkit ever gains a lenient-datatype parse.
   Every editing tool shares this round-trip tail (`core._apply`) so the rule is
-  stated once and the tools cannot drift apart — `remove_element` uses it too, and
-  `reorder_elements` should.
+  stated once and the tools cannot drift apart — every editing tool goes through
+  it.
 - **Destructive tools refuse ambiguity instead of taking the first match.**
   `get_element` and `edit_element` act on the first element with a given id,
   which is fine because a duplicate id is visible in the document they return and
@@ -275,3 +275,4 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Shared core | factored into `dd-edit-core` | one place for parse/validate + the feature-detected toolkit knobs; the sidecar and MCP can't drift |
 | Patch semantics | omit = leave, `null` = clear, `[]` = clear list | matches the app exactly, so LLM and human edits mean the same thing |
 | Ambiguous id on delete | refuse, report positions, offer `index` | a wrong delete is invisible in the result and there is no undo; a wrong edit is neither |
+| Reorder shape | full id list, must be an exact permutation | declarative and order-of-operations-free; the permutation check is what stops a truncated list from silently dropping elements. The app's `moveElement(from, to)` is a drag-and-drop affordance, not the right shape for a caller that cannot see the grid or track shifting indices across calls |

@@ -210,6 +210,44 @@ def remove_element(
 
 
 @mcp.tool()
+def reorder_elements(content: str, order: list[str]) -> dict:
+    """Reorder a dictionary's elements; return the updated document + findings.
+
+    Changes only the sequence of the elements — nothing about any element itself.
+    Element order is meaningful: it is the column order in the target data file,
+    so this edits what the dictionary describes.
+
+    `order` must list **every** element id exactly once, in the order you want.
+    Get the current ids from `list_elements` first, then send the full list
+    rearranged. A list that omits, repeats, or invents an id is rejected, and the
+    error says which — so this cannot silently drop elements. To move one element,
+    still send the whole list with that id in its new place.
+
+    Reordering requires unique ids. If the dictionary has duplicates (invalid but
+    possible), an id no longer identifies one element and this is rejected; fix
+    the duplicates with `edit_element` first.
+
+    Args:
+        content: The current dictionary (dd-json, LinkML YAML, or CSV,
+            auto-detected). The returned document is always dd-json.
+        order: Every element id, in the desired order. Must be an exact
+            permutation of the ids in the document.
+
+    Returns:
+        A dict with:
+          - document: the updated dictionary as dd-json text
+          - valid: true if there are no ERROR-level findings
+          - findings: list of findings (same shape as validate_dictionary)
+    """
+    result = core.reorder_elements(content, order)
+    return {
+        "document": result.document,
+        "valid": not any(f.level == "ERROR" for f in result.findings),
+        "findings": [f.as_dict() for f in result.findings],
+    }
+
+
+@mcp.tool()
 def list_elements(
     content: str,
     section: str | None = None,
