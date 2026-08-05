@@ -4,7 +4,7 @@ An [MCP](https://modelcontextprotocol.io) server exposing RADx data-dictionary
 tools to an LLM. Design: [../docs/MCP-DESIGN.md](../docs/MCP-DESIGN.md).
 
 **Status: phase 2 (sessions) landed.** Fifteen tools covering validate, query,
-author, the session lifecycle, and an opt-in save. Phase 1's inventory is complete
+author, the session lifecycle, and saving. Phase 1's inventory is complete
 except `render_html`, which the design doc rates low priority (a human-facing
 artifact, arguably the app's job).
 
@@ -29,7 +29,7 @@ mcp-server/
 ├── dd_edit_mcp/
 │   ├── core.py             # pure ops over the toolkit — no MCP, no FastAPI
 │   ├── sessions.py         # phase 2: documents the server holds, by handle
-│   └── server.py           # MCPServer stdio server; wraps core in the 14 tools
+│   └── server.py           # MCPServer stdio server; wraps core in the 15 tools
 └── tests/test_server.py    # core directly + protocol round-trips
 ```
 
@@ -68,10 +68,11 @@ Run pytest from this directory, so `pyproject.toml`'s config (including the
 
 ```bash
 python -m dd_edit_mcp.server                       # stdio MCP server
-python -m dd_edit_mcp.server --save-root ~/dicts   # …and allow saving under ~/dicts
+python -m dd_edit_mcp.server --save-root ~/dicts   # …confining saves to ~/dicts
 ```
 
-Wire into an MCP client (e.g. Claude Desktop `claude_desktop_config.json`):
+Wire into any MCP client. Most take a command and its arguments; a JSON config
+block is the common shape:
 
 ```json
 {
@@ -84,9 +85,9 @@ Wire into an MCP client (e.g. Claude Desktop `claude_desktop_config.json`):
 }
 ```
 
-Add `"--save-root", "/path/to/dictionaries"` to `args` to let the model write
-files, bounded to that directory — see *Saving* below for what that does and does
-not permit. Without it the server never touches the filesystem.
+Add `"--save-root", "/path/to/dictionaries"` to `args` to confine every save to
+that directory — see *Saving* below. Unset, a save may go anywhere the server
+process can write.
 
 A worked end-to-end example — wiring up a client, authoring a dictionary, and
 saving it — is in [../docs/MCP-GUIDE.md](../docs/MCP-GUIDE.md).
@@ -112,7 +113,7 @@ auto-detected).
 | `reorder_elements` | author | Reorder elements; takes every id in the wanted order. Pure. Refuses anything but an exact permutation, so it cannot silently drop an element. |
 | `import_redcap` | author | REDCap export CSV → dd-json; `{document, elementCount, valid, findings}`. Creates a document rather than editing one. Branching logic is dropped, not translated. |
 | `lookup_terms` | query | Resolve term IRIs → labels; `{labels, unresolved}`. **The only tool that uses the network** (OLS4). Unresolved terms are absent, not errors. |
-| `save_dictionary` | save | Serialise to a path and return a summary, not the text. **The only tool that touches the filesystem**, and off unless the server is started with `--save-root`. See *Saving* below. |
+| `save_dictionary` | save | Serialise to a path and return a summary, not the text. **The only tool that touches the filesystem**; `--save-root` optionally confines it to one directory. See *Saving* below. |
 
 Patch semantics for `edit_element` follow the app's editing model, so an LLM edit
 and a human edit mean the same thing: the app stores a cleared optional scalar as
@@ -184,16 +185,16 @@ authoring run's seven saves (six CSV, one LinkML, 22 elements): **~50.7k tokens
 via `export` plus a write, against ~450 via this tool.** It is the same argument
 as sessions, one step further.
 
-**Saving is off unless the server is started with a root:**
+**Saves may be confined to one directory:**
 
 ```bash
 python -m dd_edit_mcp.server --save-root /path/to/dictionaries
 ```
 
-Without the flag the tool is still listed but refuses, explaining why. Every other
-tool here is text in, text out — which is what makes them safe to expose to any
-client — so writing files is the operator's explicit choice, with a directory they
-picked. The model cannot set it.
+Unset by default. An interactive MCP client already asks a human before running a
+tool, so refusing by default would be setup friction rather than safety; the flag
+is for an agent running unattended, where nothing is prompting per call. It is a
+startup argument, so the model cannot set or widen it.
 
 Paths are confined to that root. They resolve *before* the containment check, so a
 `..` path, an absolute path elsewhere, and a symlinked destination are all refused;

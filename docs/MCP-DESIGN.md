@@ -141,11 +141,11 @@ already does this, so each is a known quantity.
 | `lookup_terms` | `dd_core.terms_lookup.lookup_labels` (`POST /terms`) | resolve unit/CDE IRIs → labels for suggestions |
 | `import_redcap` | `dd_redcap.convert_redcap` (`POST /import/redcap`) | REDCap export CSV → dd-json document |
 
-### Save  *(the one tool that touches the filesystem — opt-in)*
+### Save  *(the one tool that touches the filesystem)*
 
 | Tool | Wraps | Purpose |
 | --- | --- | --- |
-| `save_dictionary` | `export` + a bounded file write | serialise to a path and return a summary, not the text; off unless the server is started with `--save-root DIR` |
+| `save_dictionary` | `export` + a file write | serialise to a path and return a summary, not the text; `--save-root DIR` optionally confines it to one directory |
 
 Notes:
 - Every editing tool returns `{document, findings}` — the caller sees validity
@@ -224,15 +224,26 @@ That is the same argument as sessions (below), one step further: a session stops
 the *document* round-tripping on every edit, and this stops it round-tripping on
 every save.
 
-**The boundary is drawn in three places, because a filesystem tool exposed to a
-model is a different risk class from a pure one:**
+**Saving is allowed by default, and `--save-root` narrows it.** The first version
+had this the other way round — the tool refused unless a root was configured —
+which was wrong, and worth recording as a design mistake rather than quietly
+reversing.
 
-- **Off by default.** The tool is always listed, but refuses unless the server was
-  started with `--save-root DIR`. The operator opts in and picks the directory;
-  the model cannot set it, and a client that never passes the flag gets the old
-  text-in/text-out server. Listing it unconditionally is deliberate — a tool that
-  appears only sometimes is harder for a caller to reason about than one that
-  explains why it is refusing.
+The reasoning that produced it was a threat model with no threat: writing to disk
+*felt* like it needed a boundary, so one was built. But an MCP client already
+prompts a human before running a tool, and that gate is strictly better than a
+startup flag — it is per call, with the arguments visible, rather than a blanket
+grant made once at configuration time. Requiring both meant every interactive user
+paid setup friction (an extra argument, an absolute path, and a failure mode where
+saving silently does not work) to be protected from a misplaced CSV, on a server
+whose host can usually run shell commands anyway.
+
+So the flag survives for the case the client genuinely cannot cover: an agent
+running unattended — cron, CI, a background loop — where nothing prompts per call
+and a path bound is the only bound there is. For interactive use it is
+unnecessary.
+
+**When a root is set, two further guards apply:**
 - **Confined to the root.** Paths resolve (`Path.resolve()`) *before* the
   containment check, so a `..` path, an absolute path elsewhere, and a symlinked
   *destination* are all refused. Checking the string the caller sent would catch
@@ -364,12 +375,21 @@ Not solved now — flagged so phase-1/2 choices leave room.
   a caller guesses the syntax and gets `malformed-precondition` back), the shape
   of the non-string fields (`enumeration`/`missing_value_codes` are
   `[{value, label, iri}]`; `terms`/`aliases`/`examples` are plain string lists),
-  and the check names an edit tends to trip (in `validate_dictionary`). Three
-  toolkit behaviours are documented as traps because they lose data *silently*
-  rather than erroring: an enumeration item with no `value` is dropped, a list of
-  bare strings is dropped whole, and `terms` given objects is stringified and
-  split on whitespace. `tests/test_server.py` pins each documented claim, so the
-  docs cannot rot into lies without a test failing.
+  and the check names an edit tends to trip (in `validate_dictionary`).
+  `tests/test_server.py` pins each documented claim, so the docs cannot rot into
+  lies without a test failing.
+- **Three toolkit coercions are now refused rather than documented.** An
+  enumeration item with no `value` is dropped, a list of bare strings is dropped
+  whole, and `terms` given objects is stringified and split on whitespace. These
+  were originally described in the tool docstrings as traps to avoid — which was
+  not enough. A real session passed enumerations as bare strings, got
+  `valid: true` with zero findings three times over, and lost three
+  enumerations; the mistake surfaced only when an export to CSV showed empty
+  cells. Nothing downstream *could* have caught it, because an element with no
+  enumeration is structurally valid, so there is no check to fire. A warning in
+  prose is no defence against a value that vanishes quietly. `_check_field_shapes`
+  now rejects the wrong shape at the same point both editing tools already
+  validate keys, with a message naming the shape wanted.
 - Descriptions plus input schemas are shipped on every request, so they are a
   standing cost: **15 tools, ~29 KB (~7.5k tokens)** as of `save_dictionary` —
   up from ~13 KB at nine tools, as sessions and saving landed. `edit_element`
@@ -428,5 +448,6 @@ Not solved now — flagged so phase-1/2 choices leave room.
 | Absent-argument sentinel | `content: str = ""`, **not** `str \| None` | the SDK pre-parses a string argument into JSON unless the annotation is exactly `str` (`func_metadata.pre_parse_json`), so `str \| None` silently turned a dd-json document into a dict — caught only by feeding a returned document back in |
 | Session reply findings | ERRORs in full (capped), the rest as counts by check | findings scale with the document, which is precisely what a session exists to avoid; returning all of them cost 16.7 KB against a 105-byte summary |
 | `compact` output | opt-in on every document-returning tool; full form is the default | halves the bytes a stateless caller carries, losslessly; the default stays full because a file for disk should carry every field, as the app's writes do |
-| Writing files | one opt-in tool (`save_dictionary`), off unless `--save-root DIR` | the document crossing the wire twice per save (out via `export`, back via the caller's write) is the dominant token cost in an authoring run — measured at ~50.7k tokens across one run's seven saves, against ~450 for summary replies. Confined to an operator-chosen root, resolved before the containment check so a `..` path or a symlinked destination cannot escape, with an optional `expect_sha256` compare-and-swap. Every other tool stays text-in/text-out, which is what makes them safe to expose unconditionally |
+| Writing files | one tool (`save_dictionary`), allowed by default | the document crossing the wire twice per save (out via `export`, back via the caller's write) is the dominant token cost in an authoring run — measured at ~50.7k tokens across one run's seven saves, against ~450 for summary replies |
+| Save permission | `--save-root DIR` narrows; unset by default | **reversed from off-by-default, which was a mistake.** The MCP client already prompts a human per tool call — a better gate than a startup flag, since it is per call with arguments visible. Requiring both taxed every interactive user to prevent a misplaced CSV. The flag remains for an unattended agent, where no client prompts and a path bound is the only bound. When set: resolved before the containment check so a `..` path or symlinked destination cannot escape, plus an optional `expect_sha256` compare-and-swap |
 | Reorder shape | full id list, must be an exact permutation | declarative and order-of-operations-free; the permutation check is what stops a truncated list from silently dropping elements. The app's `moveElement(from, to)` is a drag-and-drop affordance, not the right shape for a caller that cannot see the grid or track shifting indices across calls |

@@ -113,12 +113,12 @@ full roadmap.
 
 ## Working with an AI assistant
 
-The repo also ships an [MCP](https://modelcontextprotocol.io) server, so an
-assistant like Claude can read, check and author data dictionaries directly —
-adding elements, fixing units, importing a REDCap export, resolving ontology
-terms, and exporting to CSV or LinkML. It uses the same toolkit the app does, so
-a dictionary edited by an assistant and one edited in the grid mean the same
-thing and validate identically.
+The repo also ships an [MCP](https://modelcontextprotocol.io) server, so an AI
+assistant can read, check and author data dictionaries directly — adding
+elements, fixing units, importing a REDCap export, resolving ontology terms, and
+exporting to CSV or LinkML. It works with any MCP client, and uses the same
+toolkit the app does, so a dictionary edited by an assistant and one edited in
+the grid mean the same thing and validate identically.
 
 It runs separately from the app, and needs no app running. Setup and a worked
 example are in [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md); the tool reference is

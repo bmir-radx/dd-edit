@@ -1,236 +1,290 @@
 # Working on data dictionaries with an AI assistant
 
-The dd-edit MCP server lets an assistant — Claude Desktop, Claude Code, or any
-other [MCP](https://modelcontextprotocol.io) client — read, check and author
-[RADx data
-dictionaries](https://github.com/bmir-radx/radx-data-dictionary-specification).
+This readme describes how to install and use the data dictionary MCP (Model
+Context Protocol) server. It lets an AI assistant — such as Claude, Codex or
+ChatGPT — read, check, create and write
+[data dictionaries](https://github.com/bmir-radx/radx-data-dictionary-specification).
 
-This is the task-oriented guide: set it up, use it, understand what it refuses to
-do. For the tool-by-tool reference see
-[../mcp-server/README.md](../mcp-server/README.md); for why it is built the way it
-is, [MCP-DESIGN.md](MCP-DESIGN.md).
+The server is designed to work in a complementary fashion to the dd-edit app. It uses the same specification libraries as the app, so a dictionary the
+assistant writes opens in dd-edit.
 
-It runs independently of the dd-edit app. Nothing needs to be open, and the
-assistant works on files or on dictionaries it builds from nothing.
+## Setting it up
 
-## Setup
+The server is fetched and run on demand. All that is needed is a Python tool
+launcher — either [uv](https://docs.astral.sh/uv/) or
+[pipx](https://pipx.pypa.io), whichever you already have. Neither is better here;
+`uv` is faster on a cold start, `pipx` is packaged in most Linux distributions.
 
-```bash
-cd mcp-server
-python -m venv .venv
-.venv/bin/pip install -e ../core     # not on PyPI — a path dependency
-.venv/bin/pip install -e .
+Every MCP client needs the same two things: a command to run, and the arguments to
+run it with. With `uv` those are
+
+```
+command:  uvx
+args:     --from git+https://github.com/bmir-radx/dd-edit.git#subdirectory=mcp-server
+          dd-edit-mcp
 ```
 
-Then point your client at it. For **Claude Desktop**, in
-`claude_desktop_config.json`:
+and with `pipx`
+
+```
+command:  pipx
+args:     run
+          --spec git+https://github.com/bmir-radx/dd-edit.git#subdirectory=mcp-server
+          dd-edit-mcp
+```
+
+Only the way they are entered differs from one client to the next. Whichever you
+use, restart it afterwards and then ask the assistant what dd-edit tools it has:
+if it lists them, the server is connected.
+
+The first run is slow, since the server pulls in a hundred-odd packages, and under
+pipx's default backend that can take several minutes. Later runs start from cache
+in well under a second. A client that gives up the first time is hitting its own
+startup timeout, so run the command once in a terminal to warm the cache and then
+restart it.
+
+### Claude Desktop
+
+Open Settings, then Developer, then Edit Config, and add a `dd-edit` entry under
+`mcpServers`. On a Mac that file is
+`~/Library/Application Support/Claude/claude_desktop_config.json`, and editing it
+directly works just as well:
 
 ```json
 {
   "mcpServers": {
     "dd-edit": {
-      "command": "/absolute/path/to/dd-edit/mcp-server/.venv/bin/python",
-      "args": ["-m", "dd_edit_mcp.server"]
+      "command": "uvx",
+      "args": ["--from",
+               "git+https://github.com/bmir-radx/dd-edit.git#subdirectory=mcp-server",
+               "dd-edit-mcp"]
     }
   }
 }
 ```
 
-For **Claude Code**, `claude mcp add` with the same command and args.
+For pipx, the same entry with `"command": "pipx"` and `"args": ["run", "--spec",
+…]` in the order shown above. Quit and reopen Claude Desktop for it to take
+effect; restarting the window is not enough.
 
-Use an absolute path to the venv's Python. The server needs that interpreter, not
-whichever one the client happens to have.
+### Claude Code
 
-To let the assistant save files, add a root — see [Saving](#saving-to-disk):
-
-```json
-"args": ["-m", "dd_edit_mcp.server", "--save-root", "/Users/you/dictionaries"]
+```bash
+claude mcp add dd-edit -- uvx \
+  --from "git+https://github.com/bmir-radx/dd-edit.git#subdirectory=mcp-server" \
+  dd-edit-mcp
 ```
 
-Restart the client and ask it what dd-edit tools it has. Fifteen is the current
-number.
+That registers the server for yourself in the current project. Add `--scope user`
+to make it available in every project instead, or `--scope project` to share it
+with anyone working in the repository. `claude mcp list` shows what is registered
+and health-checks it.
 
-## A worked example
+### Other clients
 
-What follows is a real session, lightly condensed: authoring a publications
-dictionary from scratch. It shows the shape of the work rather than a script to
-copy — you talk to the assistant, and it calls the tools.
+Codex takes the same shape:
 
-### Start a session
+```bash
+codex mcp add dd-edit -- uvx \
+  --from "git+https://github.com/bmir-radx/dd-edit.git#subdirectory=mcp-server" \
+  dd-edit-mcp
+```
 
-For more than one or two edits, the assistant should call `open_dictionary`
-first. The server then holds the document and each edit sends only what changed:
+For anything else, consult its own documentation for where the configuration
+lives. The command and arguments are the part that does not change.
+
+<details>
+<summary>Alternative: install from a clone (for development)</summary>
+
+Work on the server itself needs it installed in place, so that edits take effect
+on the next client restart rather than being pinned to whatever is on GitHub:
+
+```bash
+cd mcp-server
+python -m venv .venv
+.venv/bin/pip install -e ../core     # not on PyPI, so install it by path first
+.venv/bin/pip install -e .
+```
+
+The command and arguments then become the venv's own interpreter:
+
+```
+command:  /absolute/path/to/dd-edit/mcp-server/.venv/bin/python
+args:     -m dd_edit_mcp.server
+```
+
+The path has to be absolute, as the client will not have the venv on its `PATH`.
+
+</details>
+
+## What you can ask for
+
+Ordinary requests, in your own words:
+
+> *"Create a data dictionary for our publications — DOI, title, authors, journal,
+> publication date."*
+
+> *"Import this REDCap export and tell me what's missing."*
+
+> *"Which fields have no unit?"*
+
+> *"Change publication_type to use numeric codes instead of strings."*
+
+> *"Add ontology term IRIs to the enumerations where real ones exist."*
+
+> *"Is this valid? What would a reviewer complain about?"*
+
+> *"Save it as publications.dd.csv, and give me a LinkML version too."*
+
+Dictionaries can be created from nothing or opened from an existing file in CSV,
+LinkML YAML or dd-json.
+
+## A short example
 
 > **You:** I want to create a data dictionary about journal publications.
+>
+> **Assistant:** *(starts a working copy)* What subject matter, and do you have an
+> existing source to import?
+>
+> **You:** No source. Publications metadata — identifiers, bibliographic details,
+> open access status, citation counts.
+>
+> **Assistant:** *(adds fields one at a time, checking after each)* I've added 22
+> fields across six sections. It validates with no errors or warnings.
+>
+> Some choices worth your review: PMIDs and volumes are held as text rather than
+> numbers, because they're accession numbers and can carry values like "S1".
+> Citation count has two companion fields — a source and a retrieval date — since
+> a bare count isn't interpretable without them.
+>
+> **You:** Add ontology term IRIs to the enums.
+>
+> **Assistant:** Publication types map cleanly to MeSH and NIH institutes to
+> NCIT — 28 terms, each one verified. Licences, citation databases and record
+> sources have no ontology terms at all, so I've left those unmapped rather than
+> invent IRIs.
+>
+> **You:** Save it as publications.dd.csv.
+>
+> **Assistant:** Written — 22 elements, 12,006 bytes, validates clean.
 
-The assistant opens an empty document and gets back a handle:
+A good assistant reports the choices it made and why, rather than only that it
+finished.
 
-```json
-{"sessionId": "s1", "revision": 0, "elementCount": 0, "valid": true}
-```
+## Saving your work
 
-Every subsequent edit returns a summary like that rather than the whole
-dictionary. On a 60-element dictionary the difference is ~16k tokens per edit
-against a few hundred — see *Sessions* in the server README for the measurements.
+Ask the assistant to save and it writes the file. Give it a path or let it propose
+one. The format follows the extension, so `publications.dd.csv` and
+`publications.dd.yaml` give you a data dictionary CSV and a LinkML YAML of the
+same dictionary. The MCP client asks before it runs the tool, so nothing is
+written without your say-so.
 
-### Add elements
+Having the same file open in dd-edit makes two editors of one document, and work
+can be lost that way, since neither side merges edits. It is safest for one to own
+the file at a time: finish in the app and then hand it over, or let the assistant
+save and then reload in the app.
 
-> **You:** Add DOI, title, authors and journal, with the DOI required and
-> pattern-checked.
-
-The assistant calls `add_element` once per field. Each reply says whether the
-document is still valid, so a mistake surfaces immediately rather than at the end:
-
-```json
-{"sessionId": "s1", "revision": 4, "elementCount": 4, "valid": true,
- "errorCount": 0, "warningCount": 0}
-```
-
-Worth asking for explicitly, because the assistant will otherwise guess:
-
-- **`cardinality`** — `multiple` for authors, funders, anything repeating. It
-  matters for more than storage: the precondition operator `contains` only works
-  on multi-valued fields.
-- **`unit`** for numeric fields. A count is legitimately unitless — the UCUM
-  spelling for that is `1`, not blank.
-- **`enumeration`** for coded fields, as `[{value, label}]`. Codes can be strings
-  (`"pubmed"`) or integers (`"1"`); the toolkit does not care, your downstream
-  tooling might.
-
-### Check as you go
-
-> **You:** Is it valid?
-
-`validate_dictionary` gives the full findings list. `describe_dictionary` gives
-the shape:
-
-```json
-{"elementCount": 22, "sections": ["Identifiers", "Bibliographic", "Classification",
- "Access", "Metrics", "Provenance"], "datatypes": {"string": 15, "date": 3,
- "boolean": 1, "integer": 3}, "valid": true, "errorCount": 0, "warningCount": 0}
-```
-
-Findings are advisory, not blocking. A document mid-edit is allowed to be
-invalid — including a duplicate id — so the assistant can make a mess and fix it.
-The exception is a value the model cannot represent at all (an unknown datatype, a
-malformed enumeration or precondition); those are hard errors naming the element.
-
-### Attach ontology terms
-
-> **You:** Can you add ontology term IRIs to the enums?
-
-The assistant searches a terminology service, then **verifies each IRI with
-`lookup_terms` before writing it**. This matters: an assistant asked for ontology
-terms will otherwise produce IRIs that look right and do not resolve.
-
-```json
-{"labels": {"http://id.nlm.nih.gov/mesh/D016454": "Review"}, "unresolved": []}
-```
-
-Anything in `unresolved` did not resolve — it may be retired, private, or
-invented. Ask the assistant to drop those rather than keep them.
-
-Expect partial coverage and be suspicious of full coverage. In the real session
-behind this guide, publication types mapped cleanly to MeSH and NIH institutes
-mapped to NCIT, but licences, citation databases and record sources had no
-ontology terms at all — and NCIT's NIH branch still carries a pre-2014 name for
-one institute, so mapping it would have asserted a superseded concept. An
-assistant that maps *everything* is probably inventing.
-
-### Export or save
+An assistant running unattended, on a schedule or in a pipeline, has no client
+prompting a human before each call. Starting the server with `--save-root` bounds
+every save to one directory and refuses a request to write anywhere else:
 
 ```
-export       → returns the serialised text (CSV / LinkML YAML / dd-json)
-save_dictionary → writes the file, returns only a summary
+dd-edit-mcp --save-root /Users/you/dictionaries
 ```
 
-Prefer `save_dictionary` when the goal is a file. `export` sends the whole
-document to the assistant, which then sends it back through a write tool — the
-dictionary crosses the wire twice. Measured across seven saves of a 22-element
-dictionary: **~50.7k tokens that way, ~450 with `save_dictionary`.**
-
-Use `export` when the assistant genuinely needs to *see* the output — to show you
-a preview, or to check the serialisation.
-
-## Sessions, and when to skip them
-
-| | Use |
-| --- | --- |
-| One edit, one question | pass `content` directly — nothing to open or close |
-| Several edits in a row | `open_dictionary`, then `session_id` everywhere |
-
-Sessions live in the server process, with no expiry. Two consequences:
-
-- **Restarting the client kills them.** If the connection drops, session handles
-  are gone; `list_sessions` returns empty and the assistant must re-open from the
-  file. Anything not saved is lost.
-- **`close_dictionary` returns the final document**, so a session can end by
-  handing the dictionary back rather than by saving it.
-
-Ask the assistant to save at meaningful points rather than only at the end.
-
-## Saving to disk
-
-**The server cannot write files unless you start it with `--save-root DIR`.**
-Without that flag, `save_dictionary` is listed but refuses:
-
-```
-saving is not enabled on this server — start it with --save-root DIR to allow
-save_dictionary, or use export and write the file yourself
-```
-
-That is deliberate. Every other tool is text in, text out, which is what makes
-them safe to expose to any client. Writing files is a different kind of
-capability, so it is your decision and your directory.
-
-With a root set, paths are confined to it. An absolute path elsewhere, a `..`
-path, and a symlinked destination are all refused; relative paths resolve against
-the root. One limit worth knowing: a symlinked *directory* inside the root is
-followed, so the root should be somewhere only you can write.
-
-Format comes from the extension — `.csv`, `.yaml`/`.yml`, `.json` — or pass `to`
-to override. An unrecognised extension is refused rather than guessed.
-
-### If you also have the file open in dd-edit
-
-Two editors on one document is a real hazard, and the tooling only partly covers
-it. The app offers to reload a file that changed on disk, and `save_dictionary`
-accepts an `expect_sha256` digest so a write is refused if the file moved
-underneath it. Neither is a merge.
-
-The safe pattern is to let one side own the file at a time: finish in the app,
-then ask the assistant; or let it save, then reload in the app.
-
-## What it will not do
-
-Worth knowing before you hit it:
-
-- **Preconditions cannot express substring matching.** `contains` is set
-  membership over a multi-valued field's values — `funder contains "NIH"` asks
-  whether `NIH` is one of the entries, not whether any entry contains those
-  letters. There is no substring operator in the grammar; `matches`, `like` and
-  `~` are parse errors, and `pattern` constrains a field's own values rather than
-  another field's. If you need "show this when notes mentions fever", the honest
-  answer is that the specification cannot say it. *(This one is from experience:
-  a precondition was built on the wrong reading, parsed, validated, and could
-  never have matched.)*
-- **REDCap branching logic is dropped, not translated.** `import_redcap` converts
-  fields and enumerations; the branching grammar is not the precondition grammar,
-  and a guessed translation would be wrong in ways nobody would notice.
-- **Renaming does not rewrite references.** `edit_element` with `{"id": ...}`
-  leaves a precondition mentioning the old id dangling — it surfaces as an
-  `unknown-precondition-field` error. The app behaves the same way. Check the
-  findings after a rename.
-- **No HTML rendering.** That is the app's job.
+Add that wherever the command is configured. For interactive use it is
+unnecessary.
 
 ## Getting good results
 
-- **Ask it to validate**, and ask what the findings *mean*. Zero errors with
-  thirty INFO findings is a different document from zero of each.
-- **Question full ontology coverage** — see above.
-- **Ask why**, not just what. A field held as a string rather than an integer
-  usually has a reason (PMIDs are accession numbers, volumes can be `S1`); if the
-  assistant cannot give one, it guessed.
-- **Have it save before you close the client**, since sessions do not survive.
-- **Check the enumeration codes** against whatever consumes the data. The toolkit
-  accepts both `"pubmed"` and `"1"`; your analysis pipeline may not.
+Ask the assistant to check its work, and ask what the findings mean rather than
+only whether the dictionary is valid: a document that validates with thirty
+informational notes is a different thing from one with none.
+
+Ontology coverage is patchy, so be suspicious if every enumeration comes back with
+a term attached. Clinical and bibliographic concepts are often well covered, while
+organisations, licences and database names frequently are not, and an assistant
+that maps everything is probably inventing identifiers that look plausible and do
+not resolve. Asking which ones it verified is usually enough to tell.
+
+It is worth asking why as well as what. There is generally a reason a field is
+text rather than a number, or a value is coded 99 rather than 9, and an assistant
+that cannot give one has guessed.
+
+Ask it to save at milestones rather than only at the end. The working copy lives
+as long as the connection does, and a client restart discards anything unsaved.
+
+Finally, say what the downstream tooling needs. The specification accepts both
+text codes such as `pubmed` and numeric ones such as `1`, but an analysis pipeline
+reading the data may not.
+
+## Things it cannot do
+
+A conditional field cannot test for text inside another field. It can say "only
+when funder is NIH", but not "only when the notes mention fever", because the
+specification has no way to express a partial text match and there is no
+workaround short of changing the specification itself. Asked for one, a good
+assistant will say so rather than build a condition that quietly never triggers.
+
+Importing a REDCap export brings across the fields and their answer options, but
+not the branching logic. Those show-this-if rules use a different grammar, and a
+guessed translation would look right and be wrong.
+
+Renaming a field does not update references to it. A condition mentioning the old
+name is left dangling and shows up as an error the next time the dictionary is
+checked, which is how dd-edit behaves too.
+
+There is no rendered HTML preview. That is the app's job.
+
+---
+
+## Notes
+
+Detail that is not needed to use the server, but explains behaviour that can look
+odd from the outside.
+
+**Working copies.** For a run of edits the assistant hands the dictionary to the
+server to hold rather than carrying it back and forth. That is why it can make
+twenty changes without re-reading the file each time, and also why unsaved work
+disappears if the connection drops: the copy lives in that process and there is no
+autosave.
+
+**Why saving directly is cheaper.** Asking the assistant to display a dictionary
+so it can be saved by hand sends the whole document twice, out to the assistant
+and back again, whereas letting it save sends neither copy. Across seven saves of
+a 22-element dictionary that came to about 450 tokens rather than 50,700.
+
+**How `--save-root` is enforced.** The path is resolved before it is checked, so a
+path using `..`, an absolute path elsewhere, and a symbolic link pointing outside
+are all refused. A symlinked directory inside the allowed folder is followed
+though, so an unattended agent's root should be somewhere only you can write.
+
+**Two editors, partly guarded.** dd-edit offers to reload a file that changed on
+disk, and the server can be given the digest of the file it expects to overwrite
+and refuse the write if that no longer matches. Both catch the collision, but
+neither resolves it.
+
+**File formats.** Saving picks the format from the extension, one of `.csv`,
+`.yaml` or `.yml`, and `.json`. An unfamiliar extension is refused rather than
+guessed at.
+
+**Transient invalidity is fine.** A dictionary mid-edit is allowed to be broken,
+two fields sharing an id included, so the assistant can rearrange things and then
+fix them. A few values are rejected outright rather than recorded as problems: an
+unknown datatype, or a malformed enumeration or condition. Those come back as
+errors naming the field.
+
+**Ontology lookups reach the network.** Everything else works offline. A term that
+does not resolve comes back as unresolved rather than as an error, since it may be
+retired, private, or simply mistyped.
+
+**The word "contains".** In the specification's condition grammar, `contains` asks
+whether a multi-valued field holds a given value among its values, which is set
+membership rather than the substring matching the word suggests in English. The
+distinction matters because a condition written on the wrong reading parses
+cleanly, validates cleanly, and can never match anything.
+
+---
+
+Tool-by-tool reference: [../mcp-server/README.md](../mcp-server/README.md).
+Design and rationale: [MCP-DESIGN.md](MCP-DESIGN.md).
