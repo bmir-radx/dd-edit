@@ -12,7 +12,12 @@ license = { text = "BSD-2-Clause" }
 dependencies = [
     # The shared core carries the pinned dd-* toolkit (and format sniffing), so
     # the MCP and the app agree on parsing/validation behaviour from one place.
-    "dd-edit-core",
+    #
+    # A direct reference (PEP 508) rather than a bare name, because dd-edit-core
+    # is not published: a bare name sends pip to PyPI, where it 404s. uv resolved
+    # it anyway via [tool.uv.sources] below, which is why this only ever broke
+    # under pip — in CI, and under `pipx run` with its default backend.
+    "dd-edit-core @ git+https://github.com/bmir-radx/dd-edit.git#subdirectory=core",
     # The REDCap converter, beyond what the shared core carries. Pinned to the
     # same released tag as the sidecar so both convert identically.
     "dd-redcap @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=redcap",
@@ -22,8 +27,10 @@ dependencies = [
     "mcp>=2,<3",
 ]
 
-# Local path to the shared core for development installs. A published build
-# would depend on a released dd-edit-core instead.
+# For development, override the git reference above with the working tree, so
+# edits to core/ take effect without a commit-and-push cycle. uv honours this;
+# pip ignores it and uses the direct reference, which is why that has to be a
+# real URL rather than a bare name.
 [tool.uv.sources]
 dd-edit-core = { path = "../core", editable = true }
 
