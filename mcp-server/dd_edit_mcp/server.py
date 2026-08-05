@@ -34,9 +34,11 @@ mcp = MCPServer("dd-edit", version=_VERSION)
 # client, so this is that client's set of open documents.
 sessions = SessionStore()
 
-# Where save_dictionary is allowed to write, set from --save-root at startup.
-# None — the default — means saving is disabled entirely: this server does not
-# touch the filesystem unless the operator opts in and says where.
+# An optional directory save_dictionary is confined to, set from --save-root.
+# None — the default — means a save may go anywhere the process can write. The
+# MCP client already gates tool calls with a human in the loop, so restricting
+# by default would be friction rather than safety; the flag exists for the case
+# the client cannot cover, an agent running unattended.
 SAVE_ROOT: Path | None = None
 
 
@@ -312,12 +314,12 @@ def add_element(
         enumeration, missing_value_codes: a list of code objects,
             `[{"value": "1", "label": "Male"}, …]` — `value` is the code stored
             in the datafile, `label` is what it means, and an optional `iri`
-            links it to a term. An item with no `value` is silently dropped, and
-            a list of bare strings (`["1", "2"]`) is silently dropped whole, so
-            always send objects with a `value`.
+            links it to a term. Every item needs a `value`. A list of bare
+            strings (`["1", "2"]`) is rejected: the toolkit would drop it whole,
+            leaving a valid-looking element with no enumeration.
         aliases, terms, examples: lists of plain strings. `terms` holds IRIs as
-            strings (`["http://purl.org/…"]`) — objects are NOT accepted here and
-            are silently mangled rather than rejected.
+            strings (`["http://purl.org/…"]`); objects are rejected, since the
+            toolkit would stringify and split them on whitespace.
         precondition: a string in the grammar documented under `edit_element`.
 
     Returns:
@@ -397,12 +399,13 @@ def edit_element(
             in the datafile, `label` is what it means, and an optional `iri`
             links it to a term. These replace the whole list, so to add one code
             send the existing items plus the new one (read them with
-            `get_element` first). An item with no `value` is silently dropped,
-            and a list of bare strings (`["1", "2"]`) is silently dropped whole,
-            so always send objects with a `value`.
+            `get_element` first). Every item needs a `value`. A list of bare
+            strings (`["1", "2"]`) is rejected: the toolkit would drop it whole,
+            leaving a valid-looking element with no enumeration.
         aliases, terms, examples: lists of plain strings, also replaced whole.
-            `terms` holds IRIs as strings (`["http://purl.org/…"]`) — objects are
-            NOT accepted here and are silently mangled rather than rejected.
+            `terms` holds IRIs as strings (`["http://purl.org/…"]`); objects are
+            rejected, since the toolkit would stringify and split them on
+            whitespace.
 
     Precondition grammar:
         A `precondition` says when the field applies. It is a string in this
@@ -799,20 +802,22 @@ def save_dictionary(
     written: on a 20-element dictionary that is a few hundred bytes instead of
     around ten thousand, twice.
 
-    Saving is **off unless the server was started with `--save-root DIR`**, and
-    every path is confined to that directory: an absolute path outside it, or a
-    relative one with `..` segments that escapes it, is refused. Relative paths
-    resolve against the root.
-
     The format comes from the file extension (`.csv`, `.yaml`/`.yml`, `.json`)
     unless you pass `to` explicitly.
+
+    If the server was started with `--save-root DIR`, every path is confined to
+    that directory: an absolute path outside it, or a relative one with `..`
+    segments that escapes it, is refused, and relative paths resolve against the
+    root. Without that flag a save may go anywhere the server process can write.
 
     Concurrency: if a human may have the same file open (in dd-edit, say), read
     it first and pass its digest as `expect_sha256`. The write is then refused if
     the file changed underneath you, instead of silently discarding their edits.
 
     Args:
-        path: Where to write, absolute or relative to the save root.
+        path: Where to write. Relative paths resolve against the save root when
+            one is configured, and against the process's working directory
+            otherwise — so prefer an absolute path unless a root is set.
         content: The dictionary to save (dd-json, LinkML YAML, or CSV,
             auto-detected). Pass exactly one of `content` or `session_id`.
         session_id: An open session from `open_dictionary`, instead of `content`.
@@ -831,8 +836,8 @@ def save_dictionary(
             `describe_dictionary` runs
 
     Raises:
-        ValueError: saving not enabled, path outside the root, unknown or
-            un-inferable format, digest mismatch, or overwrite refused.
+        ValueError: path outside a configured root, unknown or un-inferable
+            format, digest mismatch, or overwrite refused.
     """
     return core.save_document(
         _document(content, session_id),
@@ -850,8 +855,9 @@ def _parser() -> argparse.ArgumentParser:
         "--save-root",
         metavar="DIR",
         help=(
-            "enable save_dictionary, confined to DIR. Omitted: saving is "
-            "disabled and callers use export plus their own write tool."
+            "confine save_dictionary to DIR. Omitted: a save may go anywhere "
+            "the server process can write. Use this for an agent running "
+            "unattended, where no client is prompting a human per tool call."
         ),
     )
     return parser
@@ -860,14 +866,14 @@ def _parser() -> argparse.ArgumentParser:
 def configure(argv: list[str] | None = None) -> Path | None:
     """Apply command-line configuration and return the resulting save root.
 
-    Split out of `main` so the flag that gates filesystem access is testable
-    without starting a server: this *is* the security boundary, so "I ran --help
-    once by hand" is not enough to know it holds. Returns the root it set, so a
-    test can assert on the value rather than reach into module state.
+    Split out of `main` so the flag bounding filesystem access is testable
+    without starting a server: "I ran --help once by hand" is not enough to know
+    a containment check holds. Returns the root it set, so a test can assert on
+    the value rather than reach into module state.
 
     A `--save-root` that is not a directory is a startup error, not a warning —
-    an operator who meant to enable saving should find out now, and one who
-    mistyped a path should not get a server that silently cannot save.
+    someone who meant to bound saving should find out now rather than discover
+    later that it was never bounded.
     """
     global SAVE_ROOT
 
@@ -886,11 +892,11 @@ def configure(argv: list[str] | None = None) -> Path | None:
 def main() -> None:
     """Run the server over stdio.
 
-    `--save-root DIR` opts into `save_dictionary` and bounds it to DIR. It is off
-    by default: every other tool in this server is text in, text out, and that is
-    what makes it safe to hand to an arbitrary client. Writing files is a
-    different kind of capability, so it is the operator's explicit choice, with a
-    directory they picked — not a flag the model can set.
+    `--save-root DIR` bounds `save_dictionary` to DIR. Unset by default, because
+    the MCP client already puts a human in front of each tool call; a second
+    permission layer underneath that is setup friction rather than safety. The
+    flag is for the case the client cannot cover — an agent running unattended,
+    where nobody is approving individual saves.
     """
     configure()
     mcp.run()

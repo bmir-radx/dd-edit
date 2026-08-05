@@ -43,6 +43,66 @@ ELEMENT_FIELDS = frozenset({
     "see_also", "aliases", "terms",
 })
 
+# Fields whose items are objects, not strings. The toolkit coerces a wrong-typed
+# value instead of refusing it, and the result is worse than an error: a list of
+# bare strings for `enumeration` lands as [] and a list of objects for `terms` is
+# stringified and split on whitespace. Neither trips a check — an element with no
+# enumeration is structurally fine — so a caller sees valid:true and a silently
+# emptied field. Checked here, where both editing tools already validate keys.
+CODED_FIELDS = frozenset({"enumeration", "missing_value_codes"})
+STRING_LIST_FIELDS = frozenset({"examples", "aliases", "terms"})
+
+
+def _check_field_shapes(patch: dict) -> None:
+    """Reject a well-formed value of the wrong type, before the toolkit eats it.
+
+    Only the list-valued fields need this: every other field is a scalar the
+    toolkit either accepts or rejects loudly.
+
+    Raises:
+        ValueError: naming the field, what was passed, and the shape wanted.
+    """
+    for field in CODED_FIELDS & set(patch):
+        value = patch[field]
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise ValueError(
+                f"{field!r} must be a list of objects, not "
+                f"{type(value).__name__}"
+            )
+        bad = [item for item in value if not isinstance(item, dict)]
+        if bad:
+            raise ValueError(
+                f"{field!r} items must be objects like "
+                f'{{"value": "1", "label": "Male"}} — got {bad[0]!r}. '
+                f"A list of bare strings is silently dropped by the toolkit, "
+                f"so it is refused here instead."
+            )
+        missing = [item for item in value if not item.get("value")]
+        if missing:
+            raise ValueError(
+                f"every {field!r} item needs a non-empty 'value'; "
+                f"got {missing[0]!r}. Items without one are dropped silently."
+            )
+
+    for field in STRING_LIST_FIELDS & set(patch):
+        value = patch[field]
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise ValueError(
+                f"{field!r} must be a list of strings, not "
+                f"{type(value).__name__}"
+            )
+        bad = [item for item in value if not isinstance(item, str)]
+        if bad:
+            raise ValueError(
+                f"{field!r} items must be plain strings — got {bad[0]!r}. "
+                f"An object here is stringified and split on whitespace, "
+                f"so it is refused instead."
+            )
+
 
 @dataclass
 class EditResult:
@@ -134,6 +194,7 @@ def add_element(
             f"unknown element field(s): {', '.join(sorted(unknown))}; "
             f"allowed: {', '.join(sorted(ELEMENT_FIELDS))}"
         )
+    _check_field_shapes(element)
 
     # Normalise the input to dd-json (accepts CSV/LinkML too) as a plain dict.
     doc = json.loads(load(document).to_json())
@@ -204,6 +265,7 @@ def edit_element(
             f"unknown element field(s): {', '.join(sorted(unknown))}; "
             f"allowed: {', '.join(sorted(ELEMENT_FIELDS))}"
         )
+    _check_field_shapes(changes)
     # id/label/datatype are non-optional in dd-json, so null/"" is never a
     # meaningful "clear" for them — reject rather than write a broken element.
     for field in ("id", "label", "datatype"):
@@ -660,21 +722,26 @@ def format_for_path(path: Path, to: str = "") -> str:
 def resolve_save_path(path: str, root: Path | None) -> Path:
     """Resolve a caller-supplied path, refusing to escape the save root.
 
-    `root` is the directory the operator passed at startup; None means saving is
-    disabled, which is the default. The check is done on the *resolved* path so
-    that `..` segments and symlinks cannot walk out of the root — comparing the
-    strings a caller sent would miss both.
+    `root` is an optional restriction: None (the default) means a save may go
+    anywhere the process can write, which is the right default for an assistant a
+    human is watching — the MCP client already asks before running a tool, and a
+    second permission layer underneath that one is friction rather than safety.
+    Setting a root is for the case the client cannot cover, an unattended agent.
+
+    When a root is set, the check is done on the *resolved* path so that `..`
+    segments and symlinks cannot walk out of it — comparing the strings a caller
+    sent would miss both.
 
     Raises:
-        ValueError: saving is not configured, or the path lands outside root.
+        ValueError: the path lands outside a configured root, or names a
+            directory.
     """
-    if root is None:
-        raise ValueError(
-            "saving is not enabled on this server — start it with "
-            "--save-root DIR to allow save_dictionary, or use export and "
-            "write the file yourself"
-        )
     candidate = Path(path).expanduser()
+    if root is None:
+        resolved = candidate.resolve()
+        if resolved.is_dir():
+            raise ValueError(f"{resolved} is a directory, not a file")
+        return resolved
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()

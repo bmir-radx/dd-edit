@@ -775,20 +775,17 @@ def test_documented_enumeration_shape_round_trips():
     ]
 
 
-def test_enumeration_silently_drops_valueless_items_as_documented():
-    # Documented as a trap rather than fixed here: the toolkit drops these
-    # without an error, so the docstring warns "always send objects with a
-    # value". If the toolkit ever starts rejecting them, this test fails and the
-    # warning should be rewritten.
-    label_only = core.edit_element(
-        GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": [{"label": "Male"}]}
-    )
-    assert json.loads(label_only.document)["elements"][1]["enumeration"] == []
-
-    bare_strings = core.edit_element(
-        GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": ["1", "2"]}
-    )
-    assert json.loads(bare_strings.document)["elements"][1]["enumeration"] == []
+def test_enumeration_shapes_the_toolkit_would_drop_are_refused():
+    # This used to assert the drop and call it documented-not-fixed. It is now
+    # fixed: a real session passed bare strings, got valid:true with no findings,
+    # and lost three enumerations — a warning in a docstring is no defence when
+    # nothing downstream can notice. See _check_field_shapes.
+    with pytest.raises(ValueError, match="non-empty 'value'"):
+        core.edit_element(
+            GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": [{"label": "Male"}]}
+        )
+    with pytest.raises(ValueError, match="must be objects"):
+        core.edit_element(GRAMMAR_FIXTURE_CSV, "sex", {"enumeration": ["1", "2"]})
 
 
 def test_terms_is_a_list_of_strings_as_documented():
@@ -1172,9 +1169,22 @@ def test_save_infers_format_from_the_extension(tmp_path):
     assert (tmp_path / "dd.txt").read_text().startswith("Id,")
 
 
-def test_save_is_disabled_unless_a_root_is_configured(tmp_path):
-    with pytest.raises(ValueError, match="saving is not enabled"):
-        core.save_document(VALID_CSV, str(tmp_path / "dd.csv"), root=None)
+def test_save_works_without_a_root_and_a_root_is_a_restriction(tmp_path):
+    """No root is the default: a save goes where it was asked to go.
+
+    The MCP client gates the tool call itself, so refusing by default would be
+    friction rather than safety. --save-root exists to bound an unattended agent,
+    and only then does an outside path become an error.
+    """
+    out = tmp_path / "anywhere.csv"
+    result = core.save_document(VALID_CSV, str(out), root=None)
+    assert out.exists() and result["elementCount"] == 2
+
+    # With a root, the same path is outside it and refused.
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(ValueError, match="refusing to save outside"):
+        core.save_document(VALID_CSV, str(out), root=root)
 
 
 def test_save_refuses_to_escape_the_root(tmp_path):
@@ -1230,16 +1240,18 @@ def test_save_guards_against_a_pointless_digest_and_honours_overwrite(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_save_over_mcp_is_off_by_default_and_bounded_when_on(tmp_path):
+async def test_save_over_mcp_writes_and_honours_a_root(tmp_path):
     async with connect() as client:
         assert "save_dictionary" in {
             t.name for t in (await client.list_tools()).tools
         }
 
-        # Default: no save root, so the tool exists but refuses.
+        # Default: no root, so an absolute path is written as asked.
+        unbounded = tmp_path / "unbounded.csv"
         res = await client.call_tool(
-            "save_dictionary", {"content": VALID_CSV, "path": "dd.csv"})
-        assert "saving is not enabled" in res.content[0].text
+            "save_dictionary", {"content": VALID_CSV, "path": str(unbounded)})
+        assert json.loads(res.content[0].text)["elementCount"] == 2
+        assert unbounded.exists()
 
         server.SAVE_ROOT = tmp_path
         try:
@@ -1262,25 +1274,28 @@ async def test_save_over_mcp_is_off_by_default_and_bounded_when_on(tmp_path):
             server.SAVE_ROOT = None
 
 
-def test_configure_gates_saving_on_the_flag(tmp_path, monkeypatch):
-    """The --save-root flag is the security boundary, so pin it rather than
-    trust a hand-run --help."""
+def test_configure_bounds_saving_when_given_a_root(tmp_path, monkeypatch):
+    """--save-root is what turns a path into a containment check, so pin it
+    rather than trust a hand-run --help."""
     monkeypatch.setattr(server, "SAVE_ROOT", None)
 
-    # No flag: saving stays off, and the tool says so rather than writing.
+    # No flag: no root, and a save goes where it was asked to.
     assert server.configure([]) is None
-    with pytest.raises(ValueError, match="saving is not enabled"):
-        server.save_dictionary(path=str(tmp_path / "dd.csv"), content=VALID_CSV)
+    unbounded = tmp_path / "unbounded.csv"
+    assert server.save_dictionary(path=str(unbounded), content=VALID_CSV)
+    assert unbounded.exists()
 
     # With the flag: the root is resolved (so a relative or ~ path is absolute
-    # by the time anything is checked against it) and saving works.
-    assert server.configure(["--save-root", str(tmp_path)]) == tmp_path.resolve()
-    assert server.SAVE_ROOT == tmp_path.resolve()
+    # by the time anything is checked against it) and saving still works.
+    root = tmp_path / "root"
+    root.mkdir()
+    assert server.configure(["--save-root", str(root)]) == root.resolve()
+    assert server.SAVE_ROOT == root.resolve()
     result = server.save_dictionary(path="dd.csv", content=VALID_CSV)
-    assert (tmp_path / "dd.csv").exists()
+    assert (root / "dd.csv").exists()
     assert result["elementCount"] == 2
 
-    # ...and the containment check is live over the configured root.
+    # ...and now the containment check is live over that root.
     with pytest.raises(ValueError, match="refusing to save outside"):
         server.save_dictionary(path="../escaped.csv", content=VALID_CSV)
 
@@ -1296,3 +1311,54 @@ def test_configure_rejects_a_save_root_that_is_not_a_directory(tmp_path, monkeyp
         with pytest.raises(SystemExit):
             server.configure(["--save-root", bad])
     assert server.SAVE_ROOT is None
+
+
+# --- silent-coercion traps ------------------------------------------------------
+#
+# Found by using the server, not by reading it: an LLM passed enumerations as a
+# list of bare strings, got valid:true with zero findings, and the values were
+# gone. Nothing could have flagged it — an element with no enumeration is
+# structurally fine — so the only defence is refusing the input.
+
+
+def test_wrong_shaped_list_fields_are_refused_not_coerced():
+    """The three documented traps, each of which used to pass silently."""
+    # Bare strings for a coded field: the toolkit stores [].
+    with pytest.raises(ValueError, match="must be objects"):
+        core.edit_element(VALID_CSV, "sex", {"enumeration": ["Male", "Female"]})
+    with pytest.raises(ValueError, match="must be objects"):
+        core.add_element(VALID_CSV, {"id": "q", "datatype": "string",
+                                     "missing_value_codes": ["-9999"]})
+
+    # An item with no value: dropped during coercion.
+    with pytest.raises(ValueError, match="non-empty 'value'"):
+        core.edit_element(VALID_CSV, "sex", {"enumeration": [{"label": "Male"}]})
+
+    # Objects for a string list: stringified and split on whitespace.
+    with pytest.raises(ValueError, match="must be plain strings"):
+        core.edit_element(VALID_CSV, "sex", {"terms": [{"value": "http://x/1"}]})
+
+    # A scalar where a list belongs.
+    with pytest.raises(ValueError, match="must be a list"):
+        core.edit_element(VALID_CSV, "sex", {"enumeration": "Male | Female"})
+
+
+def test_correctly_shaped_list_fields_still_work():
+    """The guard must not cost the shapes that were always right, including the
+    two ways to clear a list."""
+    ok = core.edit_element(VALID_CSV, "sex", {
+        "enumeration": [{"value": "1", "label": "Male"}],
+        "terms": ["http://purl.obolibrary.org/obo/NCIT_C20197"],
+        "examples": ["1"],
+    })
+    el = json.loads(ok.document)["elements"][1]
+    assert el["enumeration"][0]["value"] == "1"
+    assert el["terms"] == ["http://purl.obolibrary.org/obo/NCIT_C20197"]
+
+    # Clearing stays available in both forms (patch semantics: [] and null).
+    assert json.loads(
+        core.edit_element(VALID_CSV, "sex", {"enumeration": []}).document
+    )["elements"][1]["enumeration"] == []
+    assert json.loads(
+        core.edit_element(VALID_CSV, "sex", {"enumeration": None}).document
+    )["elements"][1]["enumeration"] == []
