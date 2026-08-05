@@ -226,6 +226,49 @@ ipcMain.handle('shell:open-external', async (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) await shell.openExternal(url)
 })
 
+// ------------------------------------------------------- opening at launch
+
+// A file the OS handed us before there was a window to show it in: `open -a
+// dd-edit file.csv`, a drag onto the dock icon, or a double-click once the app
+// claims the type. macOS delivers these as `open-file`, which can fire before
+// `whenReady`, so the path is parked here and replayed when a window is ready.
+let pendingOpen: string | null = null
+
+/** Open a path in the renderer, waiting for the window if it is still loading. */
+function openInRenderer(filePath: string): void {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!win) {
+    pendingOpen = filePath // no window yet; whenReady will replay it
+    return
+  }
+  // The renderer's 'open-recent' handler is exactly this operation — read the
+  // path, guard unsaved changes, parse — so reuse it rather than add a channel.
+  const send = (): void => win.webContents.send('menu', 'open-recent', filePath)
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
+  else send()
+}
+
+/**
+ * A dictionary path among the argv the OS launched us with, if there is one.
+ *
+ * Windows and Linux pass the file as an argument rather than an event. Electron
+ * flags and the app path itself are argv entries too, so match on a dictionary
+ * extension rather than taking argv[1] — which in dev is the project directory.
+ */
+function fileFromArgv(argv: string[]): string | null {
+  const candidate = argv
+    .slice(1)
+    .find((arg) => /\.(csv|ya?ml|json)$/i.test(arg) && existsSync(arg))
+  return candidate ?? null
+}
+
+// macOS: fires for `open -a`, a dock drop, or a double-click. Registered at
+// module scope because it can arrive before the app is ready.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  openInRenderer(filePath)
+})
+
 // ----------------------------------------------------------------- menu
 
 function sendMenu(action: string, payload?: string): void {
@@ -485,6 +528,11 @@ app.whenReady().then(async () => {
     console.error(err)
   }
   createWindow()
+  // A file we were launched with: parked by `open-file` on macOS before the
+  // window existed, or sitting in argv on Windows and Linux.
+  const launchFile = pendingOpen ?? fileFromArgv(process.argv)
+  pendingOpen = null
+  if (launchFile) openInRenderer(launchFile)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
