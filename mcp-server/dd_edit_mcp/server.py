@@ -170,10 +170,16 @@ def open_dictionary(content: str) -> dict:
 
 @mcp.tool()
 def close_dictionary(session_id: str, compact: bool = False) -> dict:
-    """Close a session and return its final document.
+    """Close a session, and get its final document back on the way out.
 
-    The document is only in the server's memory, so this is how you get it back to
-    save it. After this the session id is dead.
+    **Do not close a session in order to save it.** `save_dictionary` and
+    `export` both take a `session_id` directly, so the usual ending is: write the
+    files you want from the open session, then close it. Closing first means the
+    document comes back to you and has to be re-sent as `content` on every
+    subsequent call — the whole cost a session exists to avoid.
+
+    Close when you are done with the document. The returned copy is for the
+    caller that wants to keep holding it; after this the session id is dead.
 
     Args:
         session_id: The session to close.

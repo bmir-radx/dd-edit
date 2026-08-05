@@ -11,7 +11,19 @@ requires-python = ">=3.10"
 license = { text = "BSD-2-Clause" }
 dependencies = [
     # Shared detect/load/validate core (carries dd-api + dd-validate, pinned).
-    "dd-edit-core",
+    #
+    # A direct reference (PEP 508) rather than a bare name: dd-edit-core is not
+    # published, so a bare name sends pip to PyPI, where it 404s. Only uv reads
+    # the [tool.uv.sources] override below, which is why this has to be a real
+    # URL for every other installer.
+    #
+    # The release workflow still installs ../core *before* this, and must keep
+    # doing so — not to satisfy the dependency (this URL would) but because the
+    # build has to freeze the core being built rather than whatever is on the
+    # default branch. pip leaves an already-installed dd-edit-core alone, so that
+    # ordering wins; it also has to be a regular install, since PyInstaller
+    # cannot follow an editable install's import-hook shim.
+    "dd-edit-core @ git+https://github.com/bmir-radx/dd-edit.git#subdirectory=core",
     # Toolkit pieces the sidecar uses directly beyond the shared core, pinned to
     # the same released tag so the app ships against a known-good build.
     "dd-printer @ git+https://github.com/bmir-radx/radx-data-dictionary-specification.git@v0.0.7#subdirectory=printer",
@@ -20,8 +32,9 @@ dependencies = [
     "uvicorn>=0.29",
 ]
 
-# Local path to the shared core for development installs. A published build
-# would depend on a released dd-edit-core instead.
+# For development, override the git reference above with the working tree, so
+# edits to core/ take effect without a commit-and-push cycle. uv honours this;
+# pip ignores it and uses the direct reference.
 [tool.uv.sources]
 dd-edit-core = { path = "../core", editable = true }
 
